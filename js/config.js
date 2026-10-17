@@ -21,6 +21,13 @@ export const DEFAULT_MODEL_KEY = 'lfm25-350m';
 export const getModel = (key) => MODELS.find((m) => m.key === key) || MODELS[0];
 export const modelVersion = (m) => `${m.id}@${m.revision}#${m.dtype}`;
 
+/** Reply length presets: token budget + the length asked of the model (see llm-prompts.js). */
+export const LENGTHS = Object.freeze({
+  short: Object.freeze({ label: '短め', maxNewTokens: 110, sentences: '1〜2文', chars: 60 }),
+  normal: Object.freeze({ label: 'ふつう', maxNewTokens: 170, sentences: '2〜3文', chars: 110 }),
+  long: Object.freeze({ label: '長め', maxNewTokens: 280, sentences: '3〜5文', chars: 200 })
+});
+
 export const CONFIG = Object.freeze({
   cacheName: 'transformers-cache', // Cache Storage name used by Transformers.js (holds downloaded models)
   idleReleaseMs: 5 * 60 * 1000,    // release GPU memory after the tab has been hidden this long

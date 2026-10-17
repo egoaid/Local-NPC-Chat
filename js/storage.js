@@ -5,6 +5,8 @@ const DEFAULT_SETTINGS = {
   selectedNpc: 'ai_student', speechOn: false, rate: 1.0,
   voices: {}, // { [npcId]: { ja: voiceName|'auto', en: voiceName|'auto' } }
   model: 'lfm25-350m',   // selected model key (see config.js MODELS)
+  timeMode: 'auto',      // 'auto' (device clock) | morning|day|evening|night|late
+  replyLength: 'normal', // short|normal|long
   autoLoad: false,       // load the selected model at startup (only if already downloaded)
   modelVersions: {}      // { [modelKey]: version string last loaded }
 };
@@ -24,6 +26,8 @@ export function loadSettings() {
   return s;
 }
 export const saveSettings = (s) => write('settings', s);
+export const loadCustom = () => read('custom', { world: '', npcs: {} });
+export const saveCustom = (c) => write('custom', c);
 export const loadConversations = () => read('conversations', {});
 export function saveConversations(c) {
   const trimmed = {};

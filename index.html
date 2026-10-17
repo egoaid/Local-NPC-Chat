@@ -30,6 +30,7 @@
   <div class="badges" role="status" aria-live="polite">
     <span id="badge-model" class="badge badge-idle">モデル: 未読み込み</span>
     <span id="badge-gpu" class="badge badge-idle">WebGPU: 確認中</span>
+    <span id="badge-time" class="badge badge-idle">🕒 --</span>
   </div>
 </header>
 
@@ -91,6 +92,36 @@
         <button id="btn-clear-data" type="button" class="secondary">会話データを消去</button>
         <button id="btn-reset" type="button" class="danger">アプリのデータをリセット</button>
       </div>
+    </details>
+  </section>
+
+  <section class="card custom-card" aria-labelledby="custom-h">
+    <details>
+      <summary id="custom-h">世界と住人の設定（時間・世界観・追加設定・返答の長さ）</summary>
+      <label>世界の時間
+        <select id="sel-time">
+          <option value="auto">端末の時間に合わせる</option>
+          <option value="morning">朝に固定</option><option value="day">昼に固定</option>
+          <option value="evening">夕方に固定</option><option value="night">夜に固定</option><option value="late">深夜に固定</option>
+        </select>
+      </label>
+      <label>返答の長さ
+        <select id="sel-length"><option value="short">短め</option><option value="normal">ふつう</option><option value="long">長め</option></select>
+      </label>
+      <label for="txt-world">この世界の設定（世界観）</label>
+      <textarea id="txt-world" rows="4" maxlength="500" placeholder="例：ここは海辺の小さな港町。毎年夏に灯籠流しのお祭りがある。"></textarea>
+      <div class="counter"><span id="cnt-world">0</span> / 500</div>
+      <label for="txt-npc">「<span id="custom-npc-name"></span>」の追加設定</label>
+      <textarea id="txt-npc" rows="3" maxlength="300" placeholder="例：最近、猫を飼い始めた。甘いものが好き。"></textarea>
+      <div class="counter"><span id="cnt-npc">0</span> / 300</div>
+      <p class="muted small">入力した設定は、この端末のブラウザに自動保存され、住人は事実として会話に反映します。設定が長いほど、返事が始まるまでの時間がわずかに長くなることがあります（特に1.2B-JP）。</p>
+      <div class="row">
+        <button id="btn-export-settings" type="button" class="secondary">設定を書き出す(JSON)</button>
+        <button id="btn-import-settings" type="button" class="secondary">設定を読み込む</button>
+        <button id="btn-reset-custom" type="button" class="secondary">入力した設定を消す</button>
+      </div>
+      <input id="file-import" type="file" accept="application/json,.json" hidden>
+      <p id="custom-status" class="muted small" role="status"></p>
     </details>
   </section>
 </main>

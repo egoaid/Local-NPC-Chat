@@ -8,3 +8,4 @@
 - `update-checker.js` — `version.json`をno-storeで定期取得→新しければバナー。ユーザー承諾後に`SKIP_WAITING`→再読込。
 - `service-worker.js` — 同一オリジンのみnetwork-first（`cache:'no-cache'`）、オフライン時はシェルキャッシュ。skipWaitingは自動で行わない。
 - `version.js` — クラシックスクリプト（`index.html`と`importScripts`の両方で読める）。
+- `world.js` — 時間帯の判定。`customize.js` — 世界観/NPC追加設定の検証・JSON入出力（純粋関数）。`llm-prompts.js`は設定・時間・返答長をsystemプロンプトに合成し、途切れ整形(`finishCutoff`)も担う。

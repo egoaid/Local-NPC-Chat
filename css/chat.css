@@ -16,3 +16,8 @@
 .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .speech-opts { border-top: 1px dashed var(--line); padding-top: 6px; }
 .speech-opts summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+
+.custom-card { grid-column: 1 / -1; }
+.custom-card summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.custom-card textarea { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }
+.counter { text-align: right; font-size: .78rem; color: var(--muted); }

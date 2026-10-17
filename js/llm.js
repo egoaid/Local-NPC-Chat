@@ -90,7 +90,8 @@ function buildInputs(messages) {
   catch { return tokenizer(toPromptString(messages), { add_special_tokens: false }); }
 }
 
-export async function generate(messages, onText) {
+/** Returns {text, truncated}: truncated=true if the token limit was hit, false if not, null if unknown. */
+export async function generate(messages, onText, { maxNewTokens } = {}) {
   if (!model) throw new Error('model-not-loaded');
   const inputs = buildInputs(messages);
   stopper = new T.InterruptableStoppingCriteria();
@@ -100,13 +101,20 @@ export async function generate(messages, onText) {
     callback_function: (t) => { text += t; onText?.(text); }
   });
   const g = current.gen;
+  const limit = maxNewTokens || g.maxNewTokens;
+  let truncated = null;
   try {
-    await model.generate({
-      ...inputs, max_new_tokens: g.maxNewTokens, do_sample: true, temperature: g.temperature,
+    const out = await model.generate({
+      ...inputs, max_new_tokens: limit, do_sample: true, temperature: g.temperature,
       top_k: g.topK, repetition_penalty: g.repetitionPenalty, streamer, stopping_criteria: stopper
     });
+    try {
+      const total = out?.dims?.[1] ?? out?.sequences?.dims?.[1] ?? out?.[0]?.dims?.[1];
+      const plen = inputs.input_ids.dims[1];
+      if (typeof total === 'number') truncated = total - plen >= limit;
+    } catch { /* unknown */ }
   } finally { stopper = null; }
-  return text;
+  return { text, truncated };
 }
 
 export function stop() { stopper?.interrupt(); }
