@@ -1,6 +1,6 @@
-# DEVELOPER_NOTES — v0.5.0-build.001
+# DEVELOPER_NOTES — v0.6.0-build.001
 
-## build.2.0 (0.5.0-build.001): モデル切替
+## build.2.0 (0.6.0-build.001): モデル切替
 | key | repo | dtype | サイズ |
 |---|---|---|---|
 | lfm25-350m | LiquidAI/LFM2.5-350M-ONNX | q4 | 約290MB(推定) |
@@ -13,8 +13,8 @@
 - DL状態は Cache Storage(`transformers-cache`) 内の `.onnx` / `.onnx_data` / `tokenizer.json` の有無で判定（Transformers.jsは完了したファイルのみ保存する前提）。
 - 未検証: 1.2B-JPの実読込・速度・メモリ、`dispose()`の効果、キャッシュ判定のURL形式。公式URL: https://egoaid.github.io/Local-NPC-Chat/
 
-## build.002の注記
-`transformers.web.min.js`は`onnxruntime-web/webgpu`と`onnxruntime-common`を素のimportで参照するため、`index.html`のimport mapで`vendor/`へ解決（commonはTensorのみ再エクスポートするshim）。ORTのwasm本体は引き続きjsDelivr(固定版)から取得され、Cache Storageに保存される。
+## build.002の注記（0.6.0で更新）
+`transformers.web.min.js`の`onnxruntime-web/webgpu`/`onnxruntime-common`のimportは、0.6.0以降は同梱ファイル内で相対パスへ書き換え済み（import mapは廃止。commonはTensorのみ再エクスポートするshim）。ORTのwasm本体は引き続きjsDelivr(固定版)から取得され、Cache Storageに保存される。
 
 ## 要点
 1. **フレームワーク**: Transformers.js `@huggingface/transformers@4.2.0`（`vendor/transformers.web.min.js` として同梱、Apache-2.0）。4.2.0は2026-04-22公開。最新は4.3.1だが公開から日が浅いため見送り。

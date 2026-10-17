@@ -5,6 +5,7 @@ This applies to the application's original code, design, original NPC concepts a
 PART 2 — Third-party components (NOT covered by Part 1; each remains under its own license)
 1. Transformers.js — vendor/transformers.web.min.js
    License: Apache-2.0 (copy: vendor/LICENSE-transformers.js.txt). Source: https://github.com/huggingface/transformers.js
+   MODIFIED: two bare import specifiers in this file were rewritten to relative paths (see DEVELOPER_NOTES.md); no other changes.
    The bundle includes other open-source dependencies under their own licenses (e.g. @huggingface/jinja, @huggingface/tokenizers).
 2. ONNX Runtime Web — vendor/ort.webgpu.bundle.min.mjs (JS bundled; the .wasm binary is loaded at runtime from jsDelivr)
    License: MIT (copy: vendor/LICENSE-onnxruntime-web.txt). Source: https://github.com/microsoft/onnxruntime

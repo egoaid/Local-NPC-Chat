@@ -90,7 +90,7 @@ export class Chat {
         const npc = getNpc(npcId);
         for (let pass = 0; pass < 3 && !this.summaryAborted; pass++) {
           const mem = this.mem[npcId] || { summary: '', through: 0 };
-          const pending = pendingToFold(this.messages(npcId), mem.through);
+          const pending = pendingToFold(this.messages(npcId), mem.through, this.h.getContext?.(npcId)?.budget);
           if (pending.length < CONFIG.memory.minPending) break;
           const chunk = pending.slice(0, CONFIG.memory.maxChunk);
           const { text, truncated } = await this.llm.generate(buildSummaryMessages(npc, mem.summary, chunk), null,

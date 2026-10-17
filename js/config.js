@@ -1,10 +1,13 @@
-const M = (o) => Object.freeze({ ...o, gen: Object.freeze(o.gen) });
+const M = (o) => Object.freeze({ ...o, gen: Object.freeze(o.gen), context: Object.freeze(o.context) });
+/** "Light mode": minimal history to cut GPU load (applies to any model). */
+export const LIGHT_CONTEXT = Object.freeze({ historyChars: 500, maxMessages: 8 });
 
 /** Selectable models. Only ONE is ever resident in GPU memory (see llm.js). */
 export const MODELS = Object.freeze([
   M({
     key: 'lfm25-350m', short: '350M', label: 'LFM2.5 350M（軽量・高速）',
     id: 'LiquidAI/LFM2.5-350M-ONNX', revision: 'main', dtype: 'q4', approxMB: 290, needsF16: false,
+    context: { historyChars: 1500, maxMessages: 24 },
     note: '軽くて速いモデル。日本語はやや不自然になることがあります。',
     license: 'LFM Open License v1.0', sourceUrl: 'https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX',
     gen: { maxNewTokens: 160, temperature: 0.6, topK: 50, repetitionPenalty: 1.1 }
@@ -12,6 +15,7 @@ export const MODELS = Object.freeze([
   M({
     key: 'lfm25-1.2b-jp', short: '1.2B-JP', label: 'LFM2.5 1.2B JP（日本語向け・大きめ）',
     id: 'LiquidAI/LFM2.5-1.2B-JP-202606-ONNX', revision: 'main', dtype: 'q4f16', approxMB: 744, needsF16: true,
+    context: { historyChars: 800, maxMessages: 12 }, // heavier model: shorter prompt = shorter GPU prefill
     note: '日本語向けの大きめのモデル。メモリに余裕のある端末向け（WebGPUのshader-f16が必要）。',
     license: 'LFM Open License v1.0', sourceUrl: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-ONNX',
     gen: { maxNewTokens: 160, temperature: 0.3, topK: 50, repetitionPenalty: 1.05 }

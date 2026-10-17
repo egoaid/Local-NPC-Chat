@@ -137,6 +137,9 @@
       <button id="btn-unload" type="button" class="secondary">GPUメモリを解放</button>
       <button id="btn-delete-model" type="button" class="secondary">保存データを削除</button>
     </div>
+    <label class="toggle"><input id="chk-worker" type="checkbox"> 別スレッドで推論する（画面が固まりにくい・推奨）</label>
+    <label class="toggle"><input id="chk-light" type="checkbox"> 軽量モード（会話の履歴を短くしてGPUの負荷を下げる）</label>
+    <p id="backend-info" class="muted small"></p>
     <p id="storage-info" class="muted small"></p>
     <details id="err-details" hidden>
       <summary>技術的な詳細</summary>
@@ -170,12 +173,6 @@
   </form>
 </dialog>
 
-<script type="importmap">
-{ "imports": {
-  "onnxruntime-web/webgpu": "./vendor/ort.webgpu.bundle.min.mjs",
-  "onnxruntime-common": "./vendor/onnxruntime-common-shim.mjs"
-} }
-</script>
 <script src="js/version.js"></script>
 <script type="module" src="js/app.js"></script>
 </body>

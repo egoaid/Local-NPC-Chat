@@ -1,9 +1,6 @@
 import { CONFIG } from './config.js';
+import { createEngine } from './llm-core.js';
 
-let T = null, tokenizer = null, model = null, stopper = null, current = null;
-
-export const isLoaded = () => !!model;
-export const currentKey = () => current?.key || null;
 
 export async function checkWebGPU() {
   if (!('gpu' in navigator)) return { ok: false, reason: 'no-api' };
@@ -42,79 +39,107 @@ export async function storageEstimate() {
   try { const e = await navigator.storage?.estimate(); return e ? { usage: e.usage, quota: e.quota } : null; } catch { return null; }
 }
 
-/** Frees the model's GPU/ORT resources. Safe to call when nothing is loaded. */
-export async function unloadModel() {
-  stop();
-  const m = model;
-  model = null; tokenizer = null; current = null; stopper = null;
-  try { await m?.dispose?.(); } catch (e) { console.warn('dispose failed', e); }
+// ---- engine backend: dedicated worker (default) or main thread (fallback) ----
+let engine = null;               // main-thread engine (created lazily, only if needed)
+let worker = null;               // active Worker
+let mode = 'none';               // 'worker' | 'main' | 'none'
+let useWorker = true;
+let loadedKey = null;
+let fallbackReason = '';
+const pending = new Map();       // id -> {resolve, reject, onProgress, onText}
+let nextId = 1;
+
+export const setUseWorker = (v) => { useWorker = !!v; };
+export const backendInfo = () => ({ mode, fallbackReason, workerSupported: typeof Worker !== 'undefined' });
+export const isLoaded = () => loadedKey !== null;
+export const currentKey = () => loadedKey;
+export const __setEngineForTest = (e) => { engine = e; };
+
+const mainEngine = () => engine || (engine = createEngine());
+const mkErr = (o) => Object.assign(new Error(o?.message || 'worker error'), { name: o?.name || 'Error', code: o?.code, stack: o?.stack });
+
+function rejectAll(err) { for (const p of pending.values()) p.reject(err); pending.clear(); }
+function killWorker(reason = 'terminated') {
+  if (!worker) return;
+  const w = worker; worker = null;
+  try { w.terminate(); } catch { /* ignore */ }
+  rejectAll(Object.assign(new Error(reason), { code: 'worker-terminated' }));
 }
 
-/** Loads `def`; any previously loaded model is released FIRST so two models never share GPU memory.
- *  onProgress({phase:'downloading'|'loading', loaded, total, pct}) */
-export async function loadModel(def, onProgress) {
-  if (model && current?.key === def.key) return;
-  await unloadModel();
-  T = T || (await import('../vendor/transformers.web.min.js'));
-  T.env.allowLocalModels = false;
-  T.env.useBrowserCache = true;
-  const files = new Map();
-  const cb = (p) => {
-    if (p.status === 'progress' && p.total) {
-      files.set(p.file, { loaded: p.loaded, total: p.total });
-      let loaded = 0, total = 0;
-      files.forEach((f) => { loaded += f.loaded; total += f.total; });
-      const pct = total ? Math.min(100, (loaded / total) * 100) : 0;
-      onProgress?.({ phase: pct >= 99.9 ? 'loading' : 'downloading', loaded, total, pct });
-    }
-  };
-  onProgress?.({ phase: 'downloading', loaded: 0, total: 0, pct: 0 });
-  try {
-    tokenizer = await T.AutoTokenizer.from_pretrained(def.id, { revision: def.revision, progress_callback: cb });
-    model = await T.AutoModelForCausalLM.from_pretrained(def.id, {
-      revision: def.revision, dtype: def.dtype, device: 'webgpu', use_external_data_format: true, progress_callback: cb
-    });
-    current = def;
-    onProgress?.({ phase: 'loading', loaded: 0, total: 0, pct: 100 });
-  } catch (e) {
-    await unloadModel(); // never leave a half-loaded model holding memory
-    throw e;
-  }
-}
-
-function toPromptString(messages) {
-  return '<|startoftext|>' + messages.map((m) => `<|im_start|>${m.role}\n${m.content}<|im_end|>\n`).join('') + '<|im_start|>assistant\n';
-}
-function buildInputs(messages) {
-  try { return tokenizer.apply_chat_template(messages, { add_generation_prompt: true, return_dict: true }); }
-  catch { return tokenizer(toPromptString(messages), { add_special_tokens: false }); }
-}
-
-/** Returns {text, truncated}: truncated=true if the token limit was hit, false if not, null if unknown. */
-export async function generate(messages, onText, { maxNewTokens, temperature } = {}) {
-  if (!model) throw new Error('model-not-loaded');
-  const inputs = buildInputs(messages);
-  stopper = new T.InterruptableStoppingCriteria();
-  let text = '';
-  const streamer = new T.TextStreamer(tokenizer, {
-    skip_prompt: true, skip_special_tokens: true,
-    callback_function: (t) => { text += t; onText?.(text); }
+function startWorker() {
+  return new Promise((resolve, reject) => {
+    if (typeof Worker === 'undefined') return reject(Object.assign(new Error('Worker is not supported'), { code: 'worker-unavailable' }));
+    let w;
+    try { w = new Worker(new URL('./llm-worker.js', import.meta.url), { type: 'module' }); }
+    catch (e) { return reject(Object.assign(new Error(String(e?.message || e)), { code: 'worker-unavailable' })); }
+    const timer = setTimeout(() => { try { w.terminate(); } catch { /* ignore */ } reject(Object.assign(new Error('Worker start timed out'), { code: 'worker-unavailable' })); }, 8000);
+    let ready = false;
+    w.onmessage = (ev) => {
+      const m = ev.data || {};
+      if (m.type === 'ready') { ready = true; clearTimeout(timer); worker = w; resolve(w); return; }
+      const p = pending.get(m.id);
+      if (!p) return;
+      if (m.type === 'progress') p.onProgress?.(m.p);
+      else if (m.type === 'text') p.onText?.(m.text);
+      else if (m.type === 'done') { pending.delete(m.id); p.resolve(m.result); }
+      else if (m.type === 'error') { pending.delete(m.id); p.reject(mkErr(m.error)); }
+    };
+    w.onerror = (ev) => {
+      const err = Object.assign(new Error(ev?.message || 'Worker error'), { code: ready ? 'worker-crashed' : 'worker-unavailable' });
+      clearTimeout(timer);
+      if (!ready) { try { w.terminate(); } catch { /* ignore */ } reject(err); }
+      else { worker = null; loadedKey = null; mode = 'none'; rejectAll(err); }
+    };
   });
-  const g = current.gen;
-  const limit = maxNewTokens || g.maxNewTokens;
-  let truncated = null;
-  try {
-    const out = await model.generate({
-      ...inputs, max_new_tokens: limit, do_sample: true, temperature: temperature ?? g.temperature,
-      top_k: g.topK, repetition_penalty: g.repetitionPenalty, streamer, stopping_criteria: stopper
-    });
-    try {
-      const total = out?.dims?.[1] ?? out?.sequences?.dims?.[1] ?? out?.[0]?.dims?.[1];
-      const plen = inputs.input_ids.dims[1];
-      if (typeof total === 'number') truncated = total - plen >= limit;
-    } catch { /* unknown */ }
-  } finally { stopper = null; }
-  return { text, truncated };
 }
 
-export function stop() { stopper?.interrupt(); }
+function rpc(type, payload = {}, handlers = {}) {
+  return new Promise((resolve, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve, reject, ...handlers });
+    worker.postMessage({ type, id, ...payload });
+  });
+}
+
+/** Frees the model's GPU resources. In worker mode the whole worker is terminated (the most reliable release). */
+export async function unloadModel() {
+  loadedKey = null;
+  if (worker) { killWorker('unloaded'); }
+  if (engine) await engine.unload();
+  mode = 'none';
+}
+
+/** Loads `def` (any previous model is released FIRST). onProgress({phase, loaded, total, pct}) */
+export async function loadModel(def, onProgress) {
+  if (loadedKey === def.key) return;
+  await unloadModel();
+  fallbackReason = '';
+  if (useWorker) {
+    try {
+      await startWorker();
+      await rpc('load', { def }, { onProgress });
+      mode = 'worker'; loadedKey = def.key;
+      return;
+    } catch (e) {
+      killWorker('load failed');
+      if (e.code !== 'worker-unavailable' && e.code !== 'no-webgpu-in-worker') throw e; // real model errors are reported as-is
+      fallbackReason = e.message; // fall through to the main thread
+    }
+  }
+  try {
+    await mainEngine().load(def, onProgress);
+    mode = 'main'; loadedKey = def.key;
+  } catch (e) { loadedKey = null; mode = 'none'; throw e; }
+}
+
+/** Returns {text, truncated}. */
+export async function generate(messages, onText, opts = {}) {
+  if (loadedKey === null) throw new Error('model-not-loaded');
+  if (mode === 'worker') return rpc('generate', { messages, opts }, { onText });
+  return mainEngine().generate(messages, onText, opts);
+}
+
+export function stop() {
+  if (mode === 'worker') worker?.postMessage({ type: 'stop' });
+  else engine?.stop();
+}

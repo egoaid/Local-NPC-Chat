@@ -1,6 +1,6 @@
 # Local NPC Chat RPG（ローカルNPCチャット）
 
-**v0.5.0-build.001** — 実験用プロトタイプ
+**v0.6.0-build.001** — 実験用プロトタイプ
 
 公開URL: https://egoaid.github.io/Local-NPC-Chat/
 
@@ -45,6 +45,12 @@ GPUメモリを無駄に使わないよう、同時に読み込まれるモデ�
 - 知っているかどうかは住人ごとに別です。住人ごとのチェックで手動でも切り替えられます。「会話を消去」「新しい会話」「この住人の記憶を消す」で、初対面に戻ります。
 - 名前を入力していない場合は、プロフィールと性格だけが、知った状態の住人に伝わります。
 
+## 動作が重いとき
+画面下の「ローカルAIモデル」に、次の設定があります。
+- **別スレッドで推論する**（既定でオン）：AIの計算を別のスレッドで行い、画面が固まりにくくします。使えない環境では自動で通常の方式に切り替わります。
+- **軽量モード**：会話の履歴を短くして、AIの1回あたりの負荷を下げます（その分、少し前の話を忘れやすくなります）。
+- それでも重いときは、350Mモデルに切り替えるか、他のタブやアプリを閉じてください。
+
 ## 会話の記憶
 - 住人は、直近の会話（約1500字ぶん）をそのまま覚えています。
 - それより古い会話は、AIが短いメモ（300字まで）にまとめて覚えます。メモづくりは返事のあとにこっそり行われ、次のメッセージを送ると中断されます。
@@ -67,7 +73,7 @@ WebGPUが使える最近のブラウザ（例：PCのChrome / Edge、WebGPU対�
 会話履歴と設定は、この端末のブラウザ内にのみ保存されます。「データ管理」から会話の削除やアプリのリセットができます。
 
 ## バージョン・ライセンス
-バージョン：v0.5.0-build.001（画面上部と「About」にも表示）
+バージョン：v0.6.0-build.001（画面上部と「About」にも表示）
 
 © 2026 egoaid. All rights reserved.
 アプリ独自のコード、デザイン、キャラクター設定、文章は上記の権利表記の対象です。下記のサードパーティ素材は、それぞれのライセンスに従います（上記の表記の対象ではありません）。
@@ -75,7 +81,7 @@ WebGPUが使える最近のブラウザ（例：PCのChrome / Edge、WebGPU対�
 ## サードパーティ／オープンソースの表示
 | 名称 | ライセンス | 入手元 |
 |---|---|---|
-| Transformers.js（`vendor/transformers.web.min.js`） | Apache-2.0（`vendor/LICENSE-transformers.js.txt`） | https://github.com/huggingface/transformers.js |
+| Transformers.js（`vendor/transformers.web.min.js`。importの指定2か所のみ改変） | Apache-2.0（`vendor/LICENSE-transformers.js.txt`） | https://github.com/huggingface/transformers.js |
 | ONNX Runtime Web（`vendor/ort.webgpu.bundle.min.mjs`。wasm本体は実行時にjsDelivrから取得） | MIT（`vendor/LICENSE-onnxruntime-web.txt`） | https://github.com/microsoft/onnxruntime |
 | LFM2.5-350M-ONNX（モデル・初回に取得） | LFM Open License v1.0 | https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX |
 | LFM2.5-1.2B-JP-202606-ONNX（モデル・選択時に取得） | LFM Open License v1.0 | https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-ONNX |

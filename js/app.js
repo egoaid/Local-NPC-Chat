@@ -1,4 +1,4 @@
-import { CONFIG, APP, MODELS, LENGTHS, getModel, modelVersion, DEFAULT_MODEL_KEY } from './config.js';
+import { CONFIG, APP, MODELS, LENGTHS, LIGHT_CONTEXT, getModel, modelVersion, DEFAULT_MODEL_KEY } from './config.js';
 import { NPCS, getNpc } from './npcs.js';
 import * as LLM from './llm.js';
 import * as Store from './storage.js';
@@ -18,10 +18,12 @@ if (!LENGTH_KEYS.includes(settings.replyLength)) settings.replyLength = 'normal'
 const NPC_IDS = NPCS.map((n) => n.id);
 let custom = sanitizeCustom(Store.loadCustom(), NPC_IDS);
 const nowTime = () => resolveTime(settings.timeMode);
-const getContext = (id) => ({ memoryOn: settings.memoryOn, player: custom.player, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
+const budget = () => { const c = settings.lightMode ? LIGHT_CONTEXT : (loadedDef || selectedDef()).context; return { budgetChars: c.historyChars, maxMessages: c.maxMessages }; };
+const getContext = (id) => ({ budget: budget(), memoryOn: settings.memoryOn, player: custom.player, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
 const speech = new Speech();
 speech.on = settings.speechOn; speech.rate = settings.rate;
-let modelReady = false;
+let modelReady = false, firstTokenAt = 0, slowHintShown = false;
+LLM.setUseWorker(settings.useWorker);
 const save = () => Store.saveSettings(settings);
 const npcNow = () => getNpc(settings.selectedNpc);
 
@@ -29,7 +31,7 @@ const chat = new Chat({
   getContext,
   onKnowsChange: (id) => { if (id === settings.selectedNpc) $('chk-knows').checked = chat.knows(id); },
   onSummarizing: (on) => { $('memory-status').textContent = on ? '記憶を整理中…' : ''; if (!on) syncMemoryUI(); refreshModelUI(); },
-  onStream: (id, text) => { if (id === settings.selectedNpc) ui.streamUpdate(text); },
+  onStream: (id, text) => { if (!firstTokenAt) firstTokenAt = Date.now(); if (id === settings.selectedNpc) ui.streamUpdate(text); },
   onDone: (id) => { ui.setGenerating(false); ui.setChatEnabled(modelReady); refreshModelUI(); if (id === settings.selectedNpc) render(); },
   onError: (e) => { console.error(e); ui.toast('返事の生成に失敗しました。もう一度試してください。'); showDetails(e); }
 });
@@ -71,11 +73,12 @@ async function send() {
   const input = $('input'); const text = input.value.trim();
   if (!text) return;
   if (!modelReady) return ui.toast('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
-  input.value = ''; speech.stop(); ui.setGenerating(true);
+  input.value = ''; speech.stop(); ui.setGenerating(true); firstTokenAt = 0; const t0 = Date.now();
   const id = settings.selectedNpc;
   const p = chat.send(id, text);
   render();
   const reply = await p;
+  if (firstTokenAt && firstTokenAt - t0 > 8000 && !settings.lightMode && !slowHintShown) { slowHintShown = true; ui.toast('返事が始まるまで時間がかかっています。重いときは、画面下のモデル設定で「軽量モード」をお試しください。', 8000); }
   ui.setGenerating(false); ui.setChatEnabled(modelReady); input.focus();
   if (reply && id === settings.selectedNpc) say(reply);
   if (reply && settings.memoryOn) chat.maybeSummarize(id); // background; yields to the next message
@@ -110,7 +113,12 @@ async function refreshModelUI() {
   $('storage-info').textContent = est ? `ブラウザの保存領域: ${fmtMB(est.usage)} 使用 / 上限の目安 ${fmtMB(est.quota)}` : '';
 }
 
+function updateBackendInfo() {
+  const b = LLM.backendInfo();
+  $('backend-info').textContent = b.mode === 'worker' ? '推論: 別スレッド（Worker）で実行中' : b.mode === 'main' ? `推論: メインスレッドで実行中${b.fallbackReason ? `（別スレッドを使えなかったため: ${b.fallbackReason}）` : ''}` : '';
+}
 function markReady(def) {
+  updateBackendInfo();
   ui.setBadge('badge-model', 'ready', `Local / Offline ✓ ${def.short} 準備完了`);
   ui.showModelPanel({ msg: `使用中: ${def.label}。推論はこの端末のGPUだけで行われ、会話は外部に送信されません。` });
   ui.setChatEnabled(true);
@@ -267,6 +275,9 @@ function wire() {
   });
   $('btn-new').addEventListener('click', () => { speech.stop(); chat.newConversation(settings.selectedNpc, nowTime().key); render(); syncCustomUI(); });
   $('btn-clear').addEventListener('click', () => { speech.stop(); chat.clear(settings.selectedNpc); render(); syncCustomUI(); });
+  $('chk-worker').checked = settings.useWorker; $('chk-light').checked = settings.lightMode;
+  $('chk-worker').addEventListener('change', (e) => { settings.useWorker = e.target.checked; save(); LLM.setUseWorker(settings.useWorker); ui.toast(loadedDef ? '次にモデルを読み込むときから反映されます（「GPUメモリを解放」→「読み込む」）。' : '設定しました。'); });
+  $('chk-light').addEventListener('change', (e) => { settings.lightMode = e.target.checked; save(); ui.toast(settings.lightMode ? '軽量モードをオンにしました（次の返事から）。' : '軽量モードをオフにしました。'); });
   $('btn-load').addEventListener('click', () => switchTo(selectedDef()));
   $('btn-unload').addEventListener('click', () => unloadNow('manual'));
   $('btn-delete-model').addEventListener('click', async () => {
@@ -288,7 +299,7 @@ function wire() {
   });
   const rate = $('rng-rate'); rate.min = CONFIG.speech.minRate; rate.max = CONFIG.speech.maxRate; rate.value = settings.rate; $('out-rate').textContent = Number(settings.rate).toFixed(1);
   rate.addEventListener('input', () => { speech.rate = settings.rate = Number(rate.value); $('out-rate').textContent = speech.rate.toFixed(1); save(); });
-  const about = () => { ui.fillAbout(loadedDef || selectedDef(), { 'モデル状態': modelReady ? `Local / Offline（${loadedDef.short} 準備完了）` : '未読み込み', 'WebGPU': gpuInfo.ok ? `利用可能${gpuInfo.f16 ? '（shader-f16対応）' : '（shader-f16非対応）'}` : '利用不可', '公式URL': CONFIG.publicUrl }); $('dlg-about').showModal(); };
+  const about = () => { ui.fillAbout(loadedDef || selectedDef(), { '推論スレッド': LLM.backendInfo().mode === 'worker' ? '別スレッド(Worker)' : LLM.backendInfo().mode === 'main' ? 'メインスレッド' : '未起動', 'モデル状態': modelReady ? `Local / Offline（${loadedDef.short} 準備完了）` : '未読み込み', 'WebGPU': gpuInfo.ok ? `利用可能${gpuInfo.f16 ? '（shader-f16対応）' : '（shader-f16非対応）'}` : '利用不可', '公式URL': CONFIG.publicUrl }); $('dlg-about').showModal(); };
   $('btn-about').addEventListener('click', about); $('btn-about2').addEventListener('click', about);
   $('btn-clear-data').addEventListener('click', () => {
     if (!confirm('すべての住人との会話履歴を削除します。設定とAIモデルは残ります。よろしいですか？')) return;

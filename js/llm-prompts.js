@@ -56,8 +56,9 @@ export function buildSystemPrompt(npc, ctx = {}) {
 }
 
 /** history: [{role:'user'|'assistant', content}] (without the pending reply). */
+/** ctx.budget: {budgetChars, maxMessages} (see app.js: per-model / light mode). */
 export function buildMessages(npc, history, ctx) {
-  const recent = selectRecent(history);
+  const recent = selectRecent(history, ctx?.budget);
   return [{ role: 'system', content: buildSystemPrompt(npc, ctx) }, ...recent.map((m) => ({ role: m.role, content: m.content }))];
 }
 

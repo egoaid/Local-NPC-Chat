@@ -1,4 +1,4 @@
 # Local NPC Chat RPG
-> An experimental static web app (v0.5.0-build.001): chat with four original town residents, powered by a small language model (LFM2.5 350M or 1.2B-JP, selectable) that runs locally in the browser via WebGPU. No server, no API key; conversations stay on the device.
+> An experimental static web app (v0.6.0-build.001): chat with four original town residents, powered by a small language model (LFM2.5 350M or 1.2B-JP, selectable) that runs locally in the browser via WebGPU. No server, no API key; conversations stay on the device.
 URL: https://egoaid.github.io/Local-NPC-Chat/
 © 2026 egoaid. All rights reserved (third-party components excluded; see README.md).
