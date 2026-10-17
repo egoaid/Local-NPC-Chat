@@ -8,7 +8,9 @@
   <meta name="theme-color" content="#5b7f5a">
   <meta property="og:title" content="Local NPC Chat RPG">
   <meta property="og:description" content="On-device AI villagers in your browser (WebGPU).">
-  <meta property="og:image" content="icons/og-image.png">
+  <meta property="og:image" content="https://egoaid.github.io/Local-NPC-Chat/icons/og-image.png">
+  <meta property="og:url" content="https://egoaid.github.io/Local-NPC-Chat/">
+  <link rel="canonical" href="https://egoaid.github.io/Local-NPC-Chat/">
   <link rel="manifest" href="manifest.json">
   <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
@@ -40,11 +42,16 @@
 <main class="app-main">
   <section id="panel-model" class="card model-panel" aria-labelledby="model-h">
     <h2 id="model-h">ローカルAIモデル</h2>
-    <p id="model-msg" class="muted"></p>
+    <label>使うモデル <select id="sel-model"></select></label>
+    <p id="model-info" class="muted small"></p>
+    <p id="model-msg"></p>
     <progress id="model-progress" max="100" value="0" hidden></progress>
     <div class="row">
       <button id="btn-load" type="button">モデルを読み込む</button>
+      <button id="btn-unload" type="button" class="secondary">GPUメモリを解放</button>
+      <button id="btn-delete-model" type="button" class="secondary">保存データを削除</button>
     </div>
+    <p id="storage-info" class="muted small"></p>
     <details id="err-details" hidden>
       <summary>技術的な詳細</summary>
       <pre id="err-pre"></pre>
@@ -106,7 +113,7 @@
     <li>すべての会話履歴</li>
     <li>アプリ本体のオフライン用キャッシュ</li>
   </ul>
-  <label class="toggle"><input id="chk-reset-model" type="checkbox"> ダウンロード済みのAIモデル（約290MB）も削除する（次回は再ダウンロードが必要）</label>
+  <label class="toggle"><input id="chk-reset-model" type="checkbox"> ダウンロード済みのAIモデル（すべて。350Mは約290MB、1.2B-JPは約744MB）も削除する（次回は再ダウンロードが必要）</label>
   <form method="dialog" class="row">
     <button value="cancel" class="secondary">キャンセル</button>
     <button id="btn-reset-ok" value="ok" class="danger">削除する</button>

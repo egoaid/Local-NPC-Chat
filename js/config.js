@@ -1,20 +1,33 @@
-export const CONFIG = Object.freeze({
-  model: Object.freeze({
-    id: 'LiquidAI/LFM2.5-350M-ONNX',
-    revision: 'main',
-    dtype: 'q4',
-    device: 'webgpu',
-    approxDownloadMB: 290,
-    license: 'LFM Open License v1.0',
-    sourceUrl: 'https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX',
-    cacheName: 'transformers-cache' // Cache Storage name used by Transformers.js
+const M = (o) => Object.freeze({ ...o, gen: Object.freeze(o.gen) });
+
+/** Selectable models. Only ONE is ever resident in GPU memory (see llm.js). */
+export const MODELS = Object.freeze([
+  M({
+    key: 'lfm25-350m', short: '350M', label: 'LFM2.5 350M（軽量・高速）',
+    id: 'LiquidAI/LFM2.5-350M-ONNX', revision: 'main', dtype: 'q4', approxMB: 290, needsF16: false,
+    note: '軽くて速いモデル。日本語はやや不自然になることがあります。',
+    license: 'LFM Open License v1.0', sourceUrl: 'https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX',
+    gen: { maxNewTokens: 160, temperature: 0.6, topK: 50, repetitionPenalty: 1.1 }
   }),
-  generation: Object.freeze({ maxNewTokens: 160, temperature: 0.6, topK: 50, repetitionPenalty: 1.1 }),
+  M({
+    key: 'lfm25-1.2b-jp', short: '1.2B-JP', label: 'LFM2.5 1.2B JP（日本語向け・大きめ）',
+    id: 'LiquidAI/LFM2.5-1.2B-JP-202606-ONNX', revision: 'main', dtype: 'q4f16', approxMB: 744, needsF16: true,
+    note: '日本語向けの大きめのモデル。メモリに余裕のある端末向け（WebGPUのshader-f16が必要）。',
+    license: 'LFM Open License v1.0', sourceUrl: 'https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-ONNX',
+    gen: { maxNewTokens: 160, temperature: 0.3, topK: 50, repetitionPenalty: 1.05 }
+  })
+]);
+export const DEFAULT_MODEL_KEY = 'lfm25-350m';
+export const getModel = (key) => MODELS.find((m) => m.key === key) || MODELS[0];
+export const modelVersion = (m) => `${m.id}@${m.revision}#${m.dtype}`;
+
+export const CONFIG = Object.freeze({
+  cacheName: 'transformers-cache', // Cache Storage name used by Transformers.js (holds downloaded models)
+  idleReleaseMs: 5 * 60 * 1000,    // release GPU memory after the tab has been hidden this long
   context: Object.freeze({ maxTurns: 6, maxStoredMessages: 40, maxInputChars: 400 }),
   update: Object.freeze({ intervalMs: 30 * 60 * 1000, versionUrl: 'version.json' }),
   speech: Object.freeze({ minRate: 0.6, maxRate: 1.6, defaultRate: 1.0 }),
-  storagePrefix: 'lnpc:'
+  storagePrefix: 'lnpc:',
+  publicUrl: 'https://egoaid.github.io/Local-NPC-Chat/'
 });
-// Changes when the model identity changes -> user is told a new download may be needed.
-export const MODEL_KEY = `${CONFIG.model.id}@${CONFIG.model.revision}#${CONFIG.model.dtype}`;
 export const APP = globalThis.APP_VERSION || { version: 'unknown', appName: 'Local NPC Chat RPG', copyright: '© 2026 egoaid', rights: 'All rights reserved.' };

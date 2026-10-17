@@ -1,5 +1,5 @@
 import { NPCS, getNpc } from './npcs.js';
-import { CONFIG, APP } from './config.js';
+import { MODELS, APP } from './config.js';
 
 export const $ = (id) => document.getElementById(id);
 let toastTimer;
@@ -56,15 +56,27 @@ export function streamUpdate(text) {
 export function setGenerating(on) {
   $('btn-send').disabled = on; $('btn-stop').hidden = !on; $('input').disabled = on;
   lockNpcCards(on); $('btn-new').disabled = on; $('btn-clear').disabled = on;
+  ['sel-model', 'btn-load', 'btn-unload', 'btn-delete-model'].forEach((id) => { $(id).disabled = on || $(id).disabled; });
 }
 export function setChatEnabled(ok) { $('btn-send').disabled = !ok; }
 
-export function showModelPanel({ msg, pct = null, showLoad = false, loadLabel, error = null, hide = false }) {
-  $('panel-model').hidden = hide;
+export function showModelPanel({ msg, pct = null, error = null }) {
   $('model-msg').textContent = msg || '';
   const p = $('model-progress'); p.hidden = pct === null; if (pct !== null) p.value = pct;
-  const b = $('btn-load'); b.hidden = !showLoad; if (loadLabel) b.textContent = loadLabel;
   const d = $('err-details'); d.hidden = !error; $('err-pre').textContent = error || '';
+}
+export function renderModelSelect(selectedKey, onChange) {
+  const sel = $('sel-model'); sel.textContent = '';
+  MODELS.forEach((m) => sel.add(new Option(`${m.label}・約${m.approxMB}MB`, m.key)));
+  sel.value = selectedKey; sel.onchange = () => onChange(sel.value);
+}
+/** v: {info, loadLabel, showLoad, loadDisabled, showUnload, showDelete, locked} */
+export function setModelControls(v) {
+  $('model-info').textContent = v.info || '';
+  const l = $('btn-load'); l.hidden = !v.showLoad; l.textContent = v.loadLabel || 'モデルを読み込む'; l.disabled = v.locked || v.loadDisabled;
+  const u = $('btn-unload'); u.hidden = !v.showUnload; u.disabled = v.locked;
+  const d = $('btn-delete-model'); d.hidden = !v.showDelete; d.disabled = v.locked;
+  $('sel-model').disabled = v.locked;
 }
 
 export function showUpdate(remote, belowMinimum) {
@@ -73,12 +85,12 @@ export function showUpdate(remote, belowMinimum) {
 }
 export const hideUpdate = () => { $('update-banner').hidden = true; };
 
-export function fillAbout(extra = {}) {
+export function fillAbout(def, extra = {}) {
   const rows = [
     ['アプリ', APP.appName], ['バージョン', APP.version], ['リリース日', APP.releaseDate || ''],
-    ['モデル', `${CONFIG.model.id} (${CONFIG.model.dtype}, WebGPU)`], ['モデルのライセンス', `${CONFIG.model.license} — ${CONFIG.model.sourceUrl}`],
+    ['使用モデル', `${def.id} (${def.dtype}, WebGPU)`], ['モデルのライセンス', `${def.license} — ${def.sourceUrl}`],
     ['著作権', `${APP.copyright} ${APP.rights}`],
-    ['サードパーティ', 'Transformers.js (Apache-2.0), ONNX Runtime Web (MIT), LiquidAI LFM2.5-350M-ONNX (LFM Open License v1.0)。詳細はREADME参照。'],
+    ['サードパーティ', 'Transformers.js (Apache-2.0), ONNX Runtime Web (MIT), LiquidAI LFM2.5 ONNX models (LFM Open License v1.0)。詳細はREADME参照。'],
     ...Object.entries(extra)
   ];
   const dl = $('about-list'); dl.textContent = '';

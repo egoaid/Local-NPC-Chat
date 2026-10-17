@@ -4,7 +4,9 @@ const P = CONFIG.storagePrefix;
 const DEFAULT_SETTINGS = {
   selectedNpc: 'ai_student', speechOn: false, rate: 1.0,
   voices: {}, // { [npcId]: { ja: voiceName|'auto', en: voiceName|'auto' } }
-  modelKey: null, modelLoaded: false
+  model: 'lfm25-350m',   // selected model key (see config.js MODELS)
+  autoLoad: false,       // load the selected model at startup (only if already downloaded)
+  modelVersions: {}      // { [modelKey]: version string last loaded }
 };
 
 function read(key, fallback) {
@@ -14,7 +16,13 @@ function write(key, value) {
   try { localStorage.setItem(P + key, JSON.stringify(value)); return true; } catch { return false; }
 }
 
-export const loadSettings = () => ({ ...DEFAULT_SETTINGS, ...read('settings', {}) });
+export function loadSettings() {
+  const raw = read('settings', {});
+  const s = { ...DEFAULT_SETTINGS, ...raw };
+  if (raw.modelLoaded === true && raw.autoLoad === undefined) s.autoLoad = true; // migrate from build 0.1.x
+  delete s.modelLoaded; delete s.modelKey;
+  return s;
+}
 export const saveSettings = (s) => write('settings', s);
 export const loadConversations = () => read('conversations', {});
 export function saveConversations(c) {
@@ -30,7 +38,7 @@ export async function resetAppData({ includeModel = false } = {}) {
   if ('caches' in globalThis) {
     try {
       for (const k of await caches.keys()) {
-        if (k.startsWith('lnpc-shell-') || (includeModel && k === CONFIG.model.cacheName)) await caches.delete(k);
+        if (k.startsWith('lnpc-shell-') || (includeModel && k === CONFIG.cacheName)) await caches.delete(k);
       }
     } catch { /* ignore */ }
   }

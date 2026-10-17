@@ -8,7 +8,8 @@ PART 2 — Third-party components (NOT covered by Part 1; each remains under its
    The bundle includes other open-source dependencies under their own licenses (e.g. @huggingface/jinja, @huggingface/tokenizers).
 2. ONNX Runtime Web — vendor/ort.webgpu.bundle.min.mjs (JS bundled; the .wasm binary is loaded at runtime from jsDelivr)
    License: MIT (copy: vendor/LICENSE-onnxruntime-web.txt). Source: https://github.com/microsoft/onnxruntime
-3. LFM2.5-350M-ONNX model — downloaded at runtime from Hugging Face (not redistributed in this package)
+3. LFM2.5 ONNX models — downloaded at runtime from Hugging Face (not redistributed in this package):
+   - LFM2.5-350M-ONNX: https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX
+   - LFM2.5-1.2B-JP-202606-ONNX: https://huggingface.co/LiquidAI/LFM2.5-1.2B-JP-202606-ONNX
    License: LFM Open License v1.0 (see the LICENSE file in the model repository).
-   Source: https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX
    Use of the model is subject to Liquid AI's license terms.
