@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Local NPC Chat RPG</title>
+  <meta name="description" content="ブラウザ内で動くローカルAIと、のどかな町の住人とおしゃべりする実験アプリ。">
+  <meta name="theme-color" content="#5b7f5a">
+  <meta property="og:title" content="Local NPC Chat RPG">
+  <meta property="og:description" content="On-device AI villagers in your browser (WebGPU).">
+  <meta property="og:image" content="icons/og-image.png">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/favicon-16.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="css/layout.css">
+  <link rel="stylesheet" href="css/chat.css">
+  <link rel="stylesheet" href="css/npc-selection.css">
+  <link rel="stylesheet" href="css/status.css">
+  <link rel="stylesheet" href="css/responsive.css">
+</head>
+<body>
+<header class="app-header">
+  <div class="title-row">
+    <h1>Local NPC Chat RPG</h1>
+    <button id="btn-about" class="link-btn" type="button" aria-haspopup="dialog">v<span id="ver">…</span> ⓘ</button>
+  </div>
+  <div class="badges" role="status" aria-live="polite">
+    <span id="badge-model" class="badge badge-idle">モデル: 未読み込み</span>
+    <span id="badge-gpu" class="badge badge-idle">WebGPU: 確認中</span>
+  </div>
+</header>
+
+<div id="update-banner" class="banner" hidden>
+  <span id="update-text"></span>
+  <button id="btn-update" type="button">更新して再読み込み</button>
+  <button id="btn-update-later" type="button" class="secondary">あとで</button>
+</div>
+
+<main class="app-main">
+  <section id="panel-model" class="card model-panel" aria-labelledby="model-h">
+    <h2 id="model-h">ローカルAIモデル</h2>
+    <p id="model-msg" class="muted"></p>
+    <progress id="model-progress" max="100" value="0" hidden></progress>
+    <div class="row">
+      <button id="btn-load" type="button">モデルを読み込む</button>
+    </div>
+    <details id="err-details" hidden>
+      <summary>技術的な詳細</summary>
+      <pre id="err-pre"></pre>
+    </details>
+  </section>
+
+  <section class="npc-list" aria-label="住人を選ぶ">
+    <div id="npc-cards" class="npc-cards"></div>
+  </section>
+
+  <section class="chat-card card" aria-label="会話">
+    <div class="chat-head"><strong id="chat-npc-name"></strong><span id="chat-npc-meta" class="muted"></span></div>
+    <div id="messages" class="messages" role="log" aria-live="polite"></div>
+    <div class="input-area">
+      <textarea id="input" rows="2" maxlength="400" placeholder="話しかけてみましょう…" aria-label="メッセージ"></textarea>
+      <div class="input-buttons">
+        <button id="btn-send" type="button">送信</button>
+        <button id="btn-stop" type="button" class="secondary" hidden>停止</button>
+      </div>
+    </div>
+    <div class="controls">
+      <button id="btn-new" type="button" class="secondary">新しい会話</button>
+      <button id="btn-clear" type="button" class="secondary">会話を消去</button>
+      <label class="toggle"><input id="chk-speech" type="checkbox"> 音声</label>
+    </div>
+    <details class="speech-opts">
+      <summary>音声の設定</summary>
+      <label>速度 <input id="rng-rate" type="range" min="0.6" max="1.6" step="0.1" value="1"> <output id="out-rate">1.0</output></label>
+      <label>日本語の声 <select id="sel-ja"></select></label>
+      <label>英語の声 <select id="sel-en"></select></label>
+      <p id="voice-info" class="muted"></p>
+      <p class="muted small">Microsoft Online Natural音声は、対応するEdge等の環境にある場合のみ優先して使われます。無い場合は標準の声で読み上げます。</p>
+    </details>
+    <details class="speech-opts">
+      <summary>データ管理</summary>
+      <div class="row">
+        <button id="btn-clear-data" type="button" class="secondary">会話データを消去</button>
+        <button id="btn-reset" type="button" class="danger">アプリのデータをリセット</button>
+      </div>
+    </details>
+  </section>
+</main>
+
+<footer class="app-footer">© 2026 egoaid. All rights reserved. · <button id="btn-about2" class="link-btn" type="button">About</button></footer>
+
+<div id="toast" class="toast" role="alert" hidden></div>
+
+<dialog id="dlg-about">
+  <h2>About</h2>
+  <dl id="about-list"></dl>
+  <form method="dialog"><button>閉じる</button></form>
+</dialog>
+
+<dialog id="dlg-reset">
+  <h2>アプリのデータをリセット</h2>
+  <p>次のデータが削除されます：</p>
+  <ul>
+    <li>設定（選んだ住人、音声設定など）</li>
+    <li>すべての会話履歴</li>
+    <li>アプリ本体のオフライン用キャッシュ</li>
+  </ul>
+  <label class="toggle"><input id="chk-reset-model" type="checkbox"> ダウンロード済みのAIモデル（約290MB）も削除する（次回は再ダウンロードが必要）</label>
+  <form method="dialog" class="row">
+    <button value="cancel" class="secondary">キャンセル</button>
+    <button id="btn-reset-ok" value="ok" class="danger">削除する</button>
+  </form>
+</dialog>
+
+<script src="js/version.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

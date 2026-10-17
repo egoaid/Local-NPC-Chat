@@ -1,0 +1,5 @@
+.npc-cards { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+.npc-card { text-align: left; background: var(--card); color: var(--ink); border: 2px solid var(--line); border-radius: 12px; padding: 10px; min-height: 96px; display: flex; flex-direction: column; gap: 2px; }
+.npc-card:active { background: var(--card); }
+.npc-card[aria-pressed="true"] { border-color: var(--green); box-shadow: 0 0 0 2px var(--green) inset; }
+.npc-card .n { font-weight: 700; } .npc-card .o { font-size: .85rem; color: var(--muted); } .npc-card .d { font-size: .8rem; }

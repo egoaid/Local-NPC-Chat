@@ -1,0 +1,18 @@
+.chat-card { display: flex; flex-direction: column; gap: 8px; }
+.chat-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.messages { height: min(52dvh, 480px); overflow-y: auto; padding: 4px; display: flex; flex-direction: column; gap: 10px; scroll-behavior: smooth; }
+.msg { max-width: 86%; display: flex; flex-direction: column; gap: 2px; }
+.msg .who { font-size: .78rem; color: var(--muted); }
+.msg .bubble { padding: 8px 12px; border-radius: 14px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid var(--line); }
+.msg.npc { align-self: flex-start; } .msg.npc .bubble { background: var(--npc); border-top-left-radius: 4px; }
+.msg.me { align-self: flex-end; } .msg.me .bubble { background: var(--me); border-top-right-radius: 4px; }
+.msg.me .who { text-align: right; }
+.msg .replay { align-self: flex-start; min-height: 36px; padding: 0 10px; font-size: .85rem; }
+.msg.typing .bubble::after { content: "▍"; animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.input-area { display: flex; gap: 8px; align-items: flex-end; }
+.input-area textarea { flex: 1; resize: none; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); }
+.input-buttons { display: flex; flex-direction: column; gap: 6px; }
+.controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.speech-opts { border-top: 1px dashed var(--line); padding-top: 6px; }
+.speech-opts summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }

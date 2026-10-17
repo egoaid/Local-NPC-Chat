@@ -1,0 +1,14 @@
+PART 1 — Original material by the author
+© 2026 egoaid. All rights reserved.
+This applies to the application's original code, design, original NPC concepts and names, and original writing, except where a third-party license applies (Part 2). No license is granted to copy, modify, or redistribute these materials without permission.
+
+PART 2 — Third-party components (NOT covered by Part 1; each remains under its own license)
+1. Transformers.js — vendor/transformers.web.min.js
+   License: Apache-2.0 (copy: vendor/LICENSE-transformers.js.txt). Source: https://github.com/huggingface/transformers.js
+   The bundle includes other open-source dependencies under their own licenses (e.g. @huggingface/jinja, @huggingface/tokenizers).
+2. ONNX Runtime Web — loaded at runtime from jsDelivr (not redistributed in this package)
+   License: MIT. Source: https://github.com/microsoft/onnxruntime
+3. LFM2.5-350M-ONNX model — downloaded at runtime from Hugging Face (not redistributed in this package)
+   License: LFM Open License v1.0 (see the LICENSE file in the model repository).
+   Source: https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX
+   Use of the model is subject to Liquid AI's license terms.

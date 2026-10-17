@@ -1,0 +1,37 @@
+import { CONFIG } from './config.js';
+
+const P = CONFIG.storagePrefix;
+const DEFAULT_SETTINGS = {
+  selectedNpc: 'ai_student', speechOn: false, rate: 1.0,
+  voices: {}, // { [npcId]: { ja: voiceName|'auto', en: voiceName|'auto' } }
+  modelKey: null, modelLoaded: false
+};
+
+function read(key, fallback) {
+  try { const v = localStorage.getItem(P + key); return v ? JSON.parse(v) : fallback; } catch { return fallback; }
+}
+function write(key, value) {
+  try { localStorage.setItem(P + key, JSON.stringify(value)); return true; } catch { return false; }
+}
+
+export const loadSettings = () => ({ ...DEFAULT_SETTINGS, ...read('settings', {}) });
+export const saveSettings = (s) => write('settings', s);
+export const loadConversations = () => read('conversations', {});
+export function saveConversations(c) {
+  const trimmed = {};
+  for (const [id, msgs] of Object.entries(c)) trimmed[id] = msgs.slice(-CONFIG.context.maxStoredMessages);
+  return write('conversations', trimmed);
+}
+export function clearConversationData() { try { localStorage.removeItem(P + 'conversations'); } catch { /* ignore */ } }
+
+/** Deletes settings + conversations; optionally the model cache and app-shell caches. */
+export async function resetAppData({ includeModel = false } = {}) {
+  try { Object.keys(localStorage).filter((k) => k.startsWith(P)).forEach((k) => localStorage.removeItem(k)); } catch { /* ignore */ }
+  if ('caches' in globalThis) {
+    try {
+      for (const k of await caches.keys()) {
+        if (k.startsWith('lnpc-shell-') || (includeModel && k === CONFIG.model.cacheName)) await caches.delete(k);
+      }
+    } catch { /* ignore */ }
+  }
+}

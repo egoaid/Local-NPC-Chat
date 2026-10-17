@@ -1,0 +1,28 @@
+:root { --bg:#f4ecdc; --card:#fffaf0; --ink:#3a3a30; --muted:#7a7566; --green:#5b7f5a; --green-d:#456344; --line:#e0d4bb; --danger:#a5482f; --me:#dcebd5; --npc:#fff; }
+@media (prefers-color-scheme: dark) { :root { --bg:#22251f; --card:#2c3027; --ink:#ece6d6; --muted:#a49f8d; --line:#434a3c; --me:#3c5238; --npc:#363b30; --green:#7aa478; --green-d:#6a9468; } }
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body { background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; min-height: 100dvh;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+.app-header { padding: 10px 14px 6px; }
+.title-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+h1 { font-size: 1.15rem; margin: 0; } h2 { font-size: 1rem; margin: 0 0 6px; }
+.app-main { max-width: 1000px; margin: 0 auto; padding: 8px 12px 16px; display: grid; gap: 12px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.muted { color: var(--muted); } .small { font-size: .82rem; }
+button { font: inherit; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 0; background: var(--green); color: #fff; cursor: pointer; }
+button:active { background: var(--green-d); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.secondary { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+button.danger { background: var(--danger); }
+.link-btn { background: none; color: var(--muted); min-height: 44px; padding: 0 8px; text-decoration: underline; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 8px; }
+.banner { margin: 6px 12px; padding: 10px 12px; border-radius: 12px; background: #f3d98b; color: #3a3000; display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.banner span { flex: 1 1 200px; }
+.toast { position: fixed; left: 12px; right: 12px; bottom: calc(12px + env(safe-area-inset-bottom)); background: #333; color: #fff; padding: 10px 14px; border-radius: 10px; z-index: 20; }
+.app-footer { text-align: center; color: var(--muted); font-size: .8rem; padding: 4px 8px 16px; }
+dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); max-width: min(92vw, 460px); }
+dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: .9rem; } dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+select, textarea, input[type=range] { font: inherit; max-width: 100%; }
+label { display: block; margin: 6px 0; } .toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; }
+input[type=checkbox] { width: 20px; height: 20px; }
