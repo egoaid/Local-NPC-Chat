@@ -1,4 +1,7 @@
-# DEVELOPER_NOTES — v0.1.0-build.001
+# DEVELOPER_NOTES — v0.1.0-build.002
+
+## build.002の注記
+`transformers.web.min.js`は`onnxruntime-web/webgpu`と`onnxruntime-common`を素のimportで参照するため、`index.html`のimport mapで`vendor/`へ解決（commonはTensorのみ再エクスポートするshim）。ORTのwasm本体は引き続きjsDelivr(固定版)から取得され、Cache Storageに保存される。
 
 ## 要点
 1. **フレームワーク**: Transformers.js `@huggingface/transformers@4.2.0`（`vendor/transformers.web.min.js` として同梱、Apache-2.0）。4.2.0は2026-04-22公開。最新は4.3.1だが公開から日が浅いため見送り。

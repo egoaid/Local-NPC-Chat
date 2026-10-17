@@ -1,6 +1,6 @@
 # Local NPC Chat RPG（ローカルNPCチャット）
 
-**v0.1.0-build.001** — 実験用プロトタイプ
+**v0.1.0-build.002** — 実験用プロトタイプ
 
 のどかな町「こもれび町」の住人4人と、自由におしゃべりできるWebアプリです。会話を考えるAIは、**あなたのブラウザの中だけ**で動きます。
 
@@ -38,7 +38,7 @@ WebGPUが使える最近のブラウザ（例：PCのChrome / Edge、WebGPU対�
 会話履歴と設定は、この端末のブラウザ内にのみ保存されます。「データ管理」から会話の削除やアプリのリセットができます。
 
 ## バージョン・ライセンス
-バージョン：v0.1.0-build.001（画面上部と「About」にも表示）
+バージョン：v0.1.0-build.002（画面上部と「About」にも表示）
 
 © 2026 egoaid. All rights reserved.
 アプリ独自のコード、デザイン、キャラクター設定、文章は上記の権利表記の対象です。下記のサードパーティ素材は、それぞれのライセンスに従います（上記の表記の対象ではありません）。
@@ -47,7 +47,7 @@ WebGPUが使える最近のブラウザ（例：PCのChrome / Edge、WebGPU対�
 | 名称 | ライセンス | 入手元 |
 |---|---|---|
 | Transformers.js（`vendor/transformers.web.min.js`） | Apache-2.0（`vendor/LICENSE-transformers.js.txt`） | https://github.com/huggingface/transformers.js |
-| ONNX Runtime Web（実行時にjsDelivrから取得） | MIT | https://github.com/microsoft/onnxruntime |
+| ONNX Runtime Web（`vendor/ort.webgpu.bundle.min.mjs`。wasm本体は実行時にjsDelivrから取得） | MIT（`vendor/LICENSE-onnxruntime-web.txt`） | https://github.com/microsoft/onnxruntime |
 | LFM2.5-350M-ONNX（モデル・初回に取得） | LFM Open License v1.0 | https://huggingface.co/LiquidAI/LFM2.5-350M-ONNX |
 
 モデルのライセンス条件は、上記のモデルページで必ずご確認ください。

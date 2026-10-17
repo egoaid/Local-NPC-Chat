@@ -71,7 +71,7 @@ async function send() {
 function classify(e) {
   const m = String(e?.message || e);
   if (/out of memory|insufficient|memory|allocation|OOM/i.test(m)) return 'メモリが足りない可能性があります。他のタブやアプリを閉じてから再試行してください。';
-  if (/fetch|network|Failed to|load failed|offline|NetworkError/i.test(m)) return 'モデルのダウンロードに失敗しました。通信状況を確認して、もう一度お試しください（途中までの分は引き継がれる場合があります）。';
+  if (/Failed to fetch|NetworkError|network|load failed|offline|HTTP \d{3}/i.test(m)) return 'モデルのダウンロードに失敗しました。通信状況を確認して、もう一度お試しください（途中までの分は引き継がれる場合があります）。';
   return 'モデルの初期化に失敗しました。お使いのブラウザ/端末がWebGPUでの実行に対応していない可能性があります。';
 }
 

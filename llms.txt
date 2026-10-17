@@ -1,3 +1,3 @@
 # Local NPC Chat RPG
-> An experimental static web app (v0.1.0-build.001): chat with four original town residents, powered by a small language model that runs locally in the browser via WebGPU. No server, no API key; conversations stay on the device.
+> An experimental static web app (v0.1.0-build.002): chat with four original town residents, powered by a small language model that runs locally in the browser via WebGPU. No server, no API key; conversations stay on the device.
 © 2026 egoaid. All rights reserved (third-party components excluded; see README.md).
