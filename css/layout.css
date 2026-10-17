@@ -3,6 +3,8 @@
 @media (prefers-color-scheme: dark) { :root { --bg:#22251f; --card:#2c3027; --ink:#ece6d6; --muted:#a49f8d; --line:#434a3c; --me:#3c5238; --npc:#363b30; --green:#7aa478; --green-d:#6a9468; } }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
+html { scroll-behavior: smooth; }
+.model-panel { scroll-margin-top: 8px; }
 body { background: var(--bg); color: var(--ink); font: 16px/1.6 system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; min-height: 100dvh;
   padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
 .app-header { padding: 10px 14px 6px; }

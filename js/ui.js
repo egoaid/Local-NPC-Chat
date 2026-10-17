@@ -58,7 +58,7 @@ export function setGenerating(on) {
   lockNpcCards(on); $('btn-new').disabled = on; $('btn-clear').disabled = on;
   ['sel-model', 'btn-load', 'btn-unload', 'btn-delete-model'].forEach((id) => { $(id).disabled = on || $(id).disabled; });
 }
-export function setChatEnabled(ok) { $('btn-send').disabled = !ok; }
+export function setChatEnabled(ok) { $('btn-send').disabled = !ok; $('model-hint').hidden = ok; }
 
 export function showModelPanel({ msg, pct = null, error = null }) {
   $('model-msg').textContent = msg || '';

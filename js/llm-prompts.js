@@ -5,7 +5,8 @@ import { selectRecent } from './memory.js';
 
 const list = (a) => a.map((x) => `- ${x}`).join('\n');
 
-/** ctx: { world?: string, custom?: string, memory?: string, time?: {label, guide, auto, hour}, length?: {sentences, chars} } */
+/** ctx: { world?: string, custom?: string, memory?: string,
+ *  playerView?: undefined (no info) | null (stranger: NPC knows nothing) | {name, profile, personality, mayCallName} (acquainted), time?: {label, guide, auto, hour}, length?: {sentences, chars} } */
 export function buildSystemPrompt(npc, ctx = {}) {
   const g = npc.gender === 'male' ? '男性' : '女性';
   const len = ctx.length || LENGTHS.normal;
@@ -24,6 +25,14 @@ export function buildSystemPrompt(npc, ctx = {}) {
   ];
   if (world) parts.push(`【この世界の設定（プレイヤーが決めた事実）】\n${world}`);
   if (custom) parts.push(`【${npc.name}の追加設定（プレイヤーが決めた事実）】\n${custom}`);
+  const pv = ctx.playerView;
+  if (pv) {
+    const lines = [];
+    if (pv.name) lines.push(`名前: ${pv.name}`);
+    if (pv.profile) lines.push(`プロフィール: ${pv.profile}`);
+    if (pv.personality) lines.push(`性格: ${pv.personality}`);
+    if (lines.length) parts.push(`【話し相手（プレイヤー）について】\n${list(lines)}`);
+  }
   if (memory) parts.push(`【これまでの会話の記憶（要約）】\n${memory}`);
   if (t) parts.push(`【現在の時間帯】${t.label}${t.auto && t.hour !== null ? `（${t.hour}時ごろ）` : ''}。${t.guide}`);
   const rules = [
@@ -31,6 +40,13 @@ export function buildSystemPrompt(npc, ctx = {}) {
     '自分がAI・言語モデル・チャットボット・プログラムだとは言わない。'
   ];
   if (world || custom) rules.push('プレイヤーが決めた設定は事実として扱い、会話に自然に反映する。基本の設定と食い違う場合は、プレイヤーの設定を優先する。');
+  if (pv === null) rules.push('相手の名前や素性はまだ知らない。名前で呼ばず、相手について勝手に決めつけない。');
+  if (pv) {
+    if (pv.profile || pv.personality) rules.push('話し相手のプロフィールや性格は、すでに知っていることとして自然に会話へ反映する。毎回は触れない。');
+    if (pv.name) rules.push(pv.mayCallName
+      ? `相手の名前は「${pv.name}」。この返事では名前で呼んでもよいが、必ず呼ぶ必要はない（呼び方は${npc.name}の話し方に合わせる）。`
+      : '今回の返事では相手の名前を呼ばない。');
+  }
   if (memory) rules.push('記憶の内容は覚えているものとして自然に話す。記憶にないことは覚えていないと答えてよい。');
   rules.push('上に書かれていない町の事実や自分の経歴を勝手に作らない。知らないことは知らないと答える。');
   if (t) rules.push('時間帯に合った挨拶・話題・雰囲気で話す。ただし毎回時間の話をしない。');

@@ -7,7 +7,7 @@ import { Speech } from './speech.js';
 import { UpdateChecker } from './update-checker.js';
 import * as ui from './ui.js';
 import { resolveTime, PERIOD_KEYS } from './world.js';
-import { LIMITS, LENGTH_KEYS, sanitizeCustom, buildExport, parseImport } from './customize.js';
+import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer, buildExport, parseImport } from './customize.js';
 const { $ } = ui;
 
 const settings = Store.loadSettings();
@@ -18,7 +18,7 @@ if (!LENGTH_KEYS.includes(settings.replyLength)) settings.replyLength = 'normal'
 const NPC_IDS = NPCS.map((n) => n.id);
 let custom = sanitizeCustom(Store.loadCustom(), NPC_IDS);
 const nowTime = () => resolveTime(settings.timeMode);
-const getContext = (id) => ({ memoryOn: settings.memoryOn, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
+const getContext = (id) => ({ memoryOn: settings.memoryOn, player: custom.player, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
 const speech = new Speech();
 speech.on = settings.speechOn; speech.rate = settings.rate;
 let modelReady = false;
@@ -27,6 +27,7 @@ const npcNow = () => getNpc(settings.selectedNpc);
 
 const chat = new Chat({
   getContext,
+  onKnowsChange: (id) => { if (id === settings.selectedNpc) $('chk-knows').checked = chat.knows(id); },
   onSummarizing: (on) => { $('memory-status').textContent = on ? '記憶を整理中…' : ''; if (!on) syncMemoryUI(); refreshModelUI(); },
   onStream: (id, text) => { if (id === settings.selectedNpc) ui.streamUpdate(text); },
   onDone: (id) => { ui.setGenerating(false); ui.setChatEnabled(modelReady); refreshModelUI(); if (id === settings.selectedNpc) render(); },
@@ -69,7 +70,7 @@ function selectNpc(id) {
 async function send() {
   const input = $('input'); const text = input.value.trim();
   if (!text) return;
-  if (!modelReady) return ui.toast('先にAIモデルを読み込んでください。');
+  if (!modelReady) return ui.toast('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
   input.value = ''; speech.stop(); ui.setGenerating(true);
   const id = settings.selectedNpc;
   const p = chat.send(id, text);
@@ -195,6 +196,10 @@ function syncMemoryUI() {
 }
 function syncCustomUI() {
   syncMemoryUI(); $('chk-memory').checked = settings.memoryOn;
+  $('knows-npc-name').textContent = npcNow().name; $('chk-knows').checked = chat.knows(settings.selectedNpc);
+  $('inp-player-name').value = custom.player.name;
+  $('txt-player-profile').value = custom.player.profile; $('txt-player-personality').value = custom.player.personality;
+  $('cnt-player-profile').textContent = custom.player.profile.length; $('cnt-player-personality').textContent = custom.player.personality.length;
   const npc = npcNow();
   $('custom-npc-name').textContent = npc.name;
   $('txt-world').value = custom.world; $('txt-npc').value = custom.npcs[npc.id] || '';
@@ -217,8 +222,14 @@ function wireCustom() {
   $('sel-time').addEventListener('change', (e) => { settings.timeMode = e.target.value; save(); updateTimeBadge(); });
   $('sel-length').addEventListener('change', (e) => { settings.replyLength = e.target.value; save(); });
   setInterval(updateTimeBadge, 30000);
+  const player = () => (custom.player || (custom.player = sanitizePlayer({})));
+  $('inp-player-name').maxLength = LIMITS.playerName;
+  $('inp-player-name').addEventListener('input', (e) => { player().name = e.target.value.replace(/[\r\n]+/g, ' ').slice(0, LIMITS.playerName); persistCustom(); });
+  $('txt-player-profile').addEventListener('input', (e) => { player().profile = e.target.value.slice(0, LIMITS.playerProfile); $('cnt-player-profile').textContent = player().profile.length; persistCustom(); });
+  $('txt-player-personality').addEventListener('input', (e) => { player().personality = e.target.value.slice(0, LIMITS.playerPersonality); $('cnt-player-personality').textContent = player().personality.length; persistCustom(); });
+  $('chk-knows').addEventListener('change', (e) => chat.setKnows(settings.selectedNpc, e.target.checked));
   $('chk-memory').addEventListener('change', (e) => { settings.memoryOn = e.target.checked; save(); });
-  $('btn-clear-memory').addEventListener('click', () => { chat.clearMemory(settings.selectedNpc); syncMemoryUI(); setStatus('この住人の記憶を消しました（会話の履歴は残っています）。'); });
+  $('btn-clear-memory').addEventListener('click', () => { chat.clearMemory(settings.selectedNpc); syncCustomUI(); setStatus('この住人の記憶を消しました（会話の履歴は残っています）。'); });
   $('btn-export-settings').addEventListener('click', () => {
     const data = buildExport({ custom, timeMode: settings.timeMode, replyLength: settings.replyLength, appVersion: APP.version });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -236,7 +247,7 @@ function wireCustom() {
     const r = parseImport(await f.text(), NPC_IDS);
     if (!r.ok) { setStatus(`読み込みに失敗しました：${r.error}`); return ui.toast(r.error); }
     if (!confirm('現在の世界観・追加設定・時間・返答の長さを、ファイルの内容で上書きします。よろしいですか？')) return;
-    custom = r.data.custom; settings.timeMode = r.data.timeMode; settings.replyLength = r.data.replyLength;
+    custom = { ...r.data.custom, player: r.data.player || custom.player }; settings.timeMode = r.data.timeMode; settings.replyLength = r.data.replyLength;
     Store.saveCustom(custom); save(); syncCustomUI();
     setStatus(`設定を読み込みました。${r.warnings.join(' ')}`);
   });
@@ -254,8 +265,8 @@ function wire() {
     if (matchMedia('(pointer: coarse)').matches) return; // touch keyboards: Enter = newline
     e.preventDefault(); send();
   });
-  $('btn-new').addEventListener('click', () => { speech.stop(); chat.newConversation(settings.selectedNpc, nowTime().key); render(); });
-  $('btn-clear').addEventListener('click', () => { speech.stop(); chat.clear(settings.selectedNpc); render(); });
+  $('btn-new').addEventListener('click', () => { speech.stop(); chat.newConversation(settings.selectedNpc, nowTime().key); render(); syncCustomUI(); });
+  $('btn-clear').addEventListener('click', () => { speech.stop(); chat.clear(settings.selectedNpc); render(); syncCustomUI(); });
   $('btn-load').addEventListener('click', () => switchTo(selectedDef()));
   $('btn-unload').addEventListener('click', () => unloadNow('manual'));
   $('btn-delete-model').addEventListener('click', async () => {
@@ -281,7 +292,7 @@ function wire() {
   $('btn-about').addEventListener('click', about); $('btn-about2').addEventListener('click', about);
   $('btn-clear-data').addEventListener('click', () => {
     if (!confirm('すべての住人との会話履歴を削除します。設定とAIモデルは残ります。よろしいですか？')) return;
-    chat.clearAll(); chat.ensureGreeting(settings.selectedNpc, nowTime().key); render(); ui.toast('会話データを削除しました。');
+    chat.clearAll(); chat.ensureGreeting(settings.selectedNpc, nowTime().key); render(); syncCustomUI(); ui.toast('会話データを削除しました。');
   });
   $('btn-reset').addEventListener('click', () => $('dlg-reset').showModal());
   $('btn-reset-ok').addEventListener('click', async () => {

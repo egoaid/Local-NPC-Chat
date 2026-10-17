@@ -21,3 +21,10 @@
 .custom-card summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
 .custom-card textarea { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }
 .counter { text-align: right; font-size: .78rem; color: var(--muted); }
+
+.hint { background: #f3e9c6; color: #4a3b00; border-radius: 10px; padding: 8px 12px; font-size: .88rem; }
+.hint a { color: inherit; font-weight: 700; }
+.player-box { border: 1px solid var(--line); border-radius: 10px; margin: 8px 0; padding: 4px 10px 8px; }
+.player-box legend { font-weight: 700; padding: 0 6px; }
+.player-box input[type=text] { width: 100%; min-height: 44px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
+.player-box textarea { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }

@@ -41,23 +41,6 @@
 </div>
 
 <main class="app-main">
-  <section id="panel-model" class="card model-panel" aria-labelledby="model-h">
-    <h2 id="model-h">ローカルAIモデル</h2>
-    <label>使うモデル <select id="sel-model"></select></label>
-    <p id="model-info" class="muted small"></p>
-    <p id="model-msg"></p>
-    <progress id="model-progress" max="100" value="0" hidden></progress>
-    <div class="row">
-      <button id="btn-load" type="button">モデルを読み込む</button>
-      <button id="btn-unload" type="button" class="secondary">GPUメモリを解放</button>
-      <button id="btn-delete-model" type="button" class="secondary">保存データを削除</button>
-    </div>
-    <p id="storage-info" class="muted small"></p>
-    <details id="err-details" hidden>
-      <summary>技術的な詳細</summary>
-      <pre id="err-pre"></pre>
-    </details>
-  </section>
 
   <section class="npc-list" aria-label="住人を選ぶ">
     <div id="npc-cards" class="npc-cards"></div>
@@ -66,6 +49,7 @@
   <section class="chat-card card" aria-label="会話">
     <div class="chat-head"><strong id="chat-npc-name"></strong><span id="chat-npc-meta" class="muted"></span><span id="memory-status" class="muted small" role="status"></span></div>
     <div id="messages" class="messages" role="log" aria-live="polite"></div>
+    <div id="model-hint" class="hint" hidden>AIモデルが未読み込みです。画面下の「ローカルAIモデル」から読み込んでください。 <a href="#panel-model">モデルの設定へ</a></div>
     <div class="input-area">
       <textarea id="input" rows="2" maxlength="400" placeholder="話しかけてみましょう…" aria-label="メッセージ"></textarea>
       <div class="input-buttons">
@@ -108,12 +92,25 @@
       <label>返答の長さ
         <select id="sel-length"><option value="short">短め</option><option value="normal">ふつう</option><option value="long">長め</option></select>
       </label>
+      <fieldset class="player-box">
+        <legend>あなた（プレイヤー）の設定</legend>
+        <label for="inp-player-name">名前</label>
+        <input id="inp-player-name" type="text" maxlength="20" placeholder="例：ハル" autocomplete="off">
+        <label for="txt-player-profile">プロフィール</label>
+        <textarea id="txt-player-profile" rows="3" maxlength="300" placeholder="例：25歳。この町に引っ越してきたばかりの会社員。"></textarea>
+        <div class="counter"><span id="cnt-player-profile">0</span> / 300</div>
+        <label for="txt-player-personality">性格</label>
+        <textarea id="txt-player-personality" rows="3" maxlength="300" placeholder="例：人見知りだが、好きな話題には夢中になる。"></textarea>
+        <div class="counter"><span id="cnt-player-personality">0</span> / 300</div>
+        <p class="muted small">住人は、初対面ではあなたの名前もプロフィールも知りません。会話の中であなたが名前を名乗ると、その住人は知った状態になり、名前を時々呼ぶようになります（毎回は呼びません）。</p>
+      </fieldset>
       <label for="txt-world">この世界の設定（世界観）</label>
       <textarea id="txt-world" rows="4" maxlength="500" placeholder="例：ここは海辺の小さな港町。毎年夏に灯籠流しのお祭りがある。"></textarea>
       <div class="counter"><span id="cnt-world">0</span> / 500</div>
       <label for="txt-npc">「<span id="custom-npc-name"></span>」の追加設定</label>
       <textarea id="txt-npc" rows="3" maxlength="300" placeholder="例：最近、猫を飼い始めた。甘いものが好き。"></textarea>
       <div class="counter"><span id="cnt-npc">0</span> / 300</div>
+      <label class="toggle"><input id="chk-knows" type="checkbox"> 「<span id="knows-npc-name"></span>」は、あなたの名前やプロフィールを知っている</label>
       <label class="toggle"><input id="chk-memory" type="checkbox"> 会話の記憶（古い会話を短く要約して覚える）</label>
       <label for="txt-memory">「<span id="memory-npc-name"></span>」が覚えていること（確認用）</label>
       <textarea id="txt-memory" rows="3" readonly placeholder="会話が長くなると、古い内容がここにまとまります。"></textarea>
@@ -126,6 +123,24 @@
       </div>
       <input id="file-import" type="file" accept="application/json,.json" hidden>
       <p id="custom-status" class="muted small" role="status"></p>
+    </details>
+  </section>
+
+  <section id="panel-model" class="card model-panel" aria-labelledby="model-h">
+    <h2 id="model-h">ローカルAIモデル</h2>
+    <label>使うモデル <select id="sel-model"></select></label>
+    <p id="model-info" class="muted small"></p>
+    <p id="model-msg"></p>
+    <progress id="model-progress" max="100" value="0" hidden></progress>
+    <div class="row">
+      <button id="btn-load" type="button">モデルを読み込む</button>
+      <button id="btn-unload" type="button" class="secondary">GPUメモリを解放</button>
+      <button id="btn-delete-model" type="button" class="secondary">保存データを削除</button>
+    </div>
+    <p id="storage-info" class="muted small"></p>
+    <details id="err-details" hidden>
+      <summary>技術的な詳細</summary>
+      <pre id="err-pre"></pre>
     </details>
   </section>
 </main>

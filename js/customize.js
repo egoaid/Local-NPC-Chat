@@ -1,26 +1,36 @@
 // Player customization (world setting + per-NPC extra settings) and JSON export/import.
 import { PERIOD_KEYS } from './world.js';
 
-export const LIMITS = Object.freeze({ world: 500, npc: 300, fileBytes: 100 * 1024 });
+export const LIMITS = Object.freeze({ world: 500, npc: 300, playerName: 20, playerProfile: 300, playerPersonality: 300, fileBytes: 100 * 1024 });
 export const SCHEMA = 'local-npc-chat-rpg/settings';
 export const SCHEMA_VERSION = 1;
 export const LENGTH_KEYS = Object.freeze(['short', 'normal', 'long']);
 
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max);
 
-export const emptyCustom = () => ({ world: '', npcs: {} });
+export const emptyPlayer = () => ({ name: '', profile: '', personality: '' });
+export const emptyCustom = () => ({ world: '', npcs: {}, player: emptyPlayer() });
+
+export function sanitizePlayer(p) {
+  return {
+    name: clean(String(p?.name ?? '').replace(/[\r\n]+/g, ' '), LIMITS.playerName),
+    profile: clean(p?.profile, LIMITS.playerProfile),
+    personality: clean(p?.personality, LIMITS.playerPersonality)
+  };
+}
 
 export function sanitizeCustom(c, npcIds) {
   const out = emptyCustom();
   out.world = clean(c?.world, LIMITS.world);
   for (const id of npcIds) { const t = clean(c?.npcs?.[id], LIMITS.npc); if (t) out.npcs[id] = t; }
+  out.player = sanitizePlayer(c?.player);
   return out;
 }
 
 export function buildExport({ custom, timeMode, replyLength, appVersion, now = new Date() }) {
   return {
     schema: SCHEMA, schemaVersion: SCHEMA_VERSION, appVersion, exportedAt: now.toISOString(),
-    world: custom.world || '', npcs: { ...custom.npcs }, timeMode, replyLength
+    world: custom.world || '', npcs: { ...custom.npcs }, player: { ...emptyPlayer(), ...custom.player }, timeMode, replyLength
   };
 }
 
@@ -45,5 +55,12 @@ export function parseImport(text, npcIds) {
   const timeMode = j.timeMode === 'auto' || PERIOD_KEYS.includes(j.timeMode) ? j.timeMode : 'auto';
   if (j.timeMode !== timeMode) warnings.push('時間の設定が不正だったため「端末の時間」にしました。');
   const replyLength = LENGTH_KEYS.includes(j.replyLength) ? j.replyLength : 'normal';
-  return { ok: true, warnings, data: { custom: { world: world.slice(0, LIMITS.world), npcs }, timeMode, replyLength } };
+  let player;
+  if (j.player && typeof j.player === 'object' && !Array.isArray(j.player)) {
+    player = sanitizePlayer(j.player);
+    for (const [k, lim] of [['name', LIMITS.playerName], ['profile', LIMITS.playerProfile], ['personality', LIMITS.playerPersonality]]) {
+      if (String(j.player[k] ?? '').trim().length > lim) warnings.push(`プレイヤーの「${k}」が${lim}文字を超えていたため切り詰めました。`);
+    }
+  } // absent -> undefined: the app keeps the current player settings
+  return { ok: true, warnings, data: { custom: { world: world.slice(0, LIMITS.world), npcs }, player, timeMode, replyLength } };
 }

@@ -4,6 +4,7 @@ import { buildMessages, buildSummaryMessages, cleanReply, cleanSummary, finishCu
 import * as LLMReal from './llm.js';
 import * as Store from './storage.js';
 import { selectRecent, pendingToFold } from './memory.js';
+import { mentionsName, nameCooldownOk } from './player.js';
 
 export class Chat {
   /** handlers: onStream(npcId,text) onDone(npcId) onError(err) onSummarizing(bool) getContext(npcId); llm (optional, for tests) */
@@ -12,6 +13,7 @@ export class Chat {
     this.llm = handlers.llm || LLMReal;
     this.convs = Store.loadConversations();
     this.mem = Store.loadMemory(); // { [npcId]: { summary, through } }
+    this.rel = Store.loadRelations(); // { [npcId]: { knows: true } } -> has this NPC been introduced to the player?
     this.generating = false; this.summarizing = false; this.summaryAborted = false; this.summaryPromise = null;
     this.stopRequested = false;
     this.lastId = 0;
@@ -20,6 +22,8 @@ export class Chat {
   get busy() { return this.generating || this.summarizing; }
   newId() { this.lastId = Math.max(this.lastId + 1, Date.now()); return this.lastId; }
   messages(npcId) { return this.convs[npcId] || (this.convs[npcId] = []); }
+  knows(npcId) { return !!this.rel[npcId]?.knows; }
+  setKnows(npcId, on) { if (on) this.rel[npcId] = { knows: true }; else delete this.rel[npcId]; Store.saveRelations(this.rel); }
   memoryOf(npcId) { return this.mem[npcId]?.summary || ''; }
   save() { Store.saveConversations(this.convs); }
   saveMem() { Store.saveMemory(this.mem); }
@@ -29,10 +33,10 @@ export class Chat {
     if (!list.length) { list.push({ id: this.newId(), role: 'assistant', content: greetingFor(getNpc(npcId), periodKey), greeting: true }); this.save(); }
   }
   abortSummary() { if (this.summarizing) { this.summaryAborted = true; this.llm.stop(); } }
-  clearMemory(npcId) { this.abortSummary(); delete this.mem[npcId]; this.saveMem(); }
-  clear(npcId) { this.abortSummary(); this.convs[npcId] = []; delete this.mem[npcId]; this.save(); this.saveMem(); }
+  clearMemory(npcId) { this.abortSummary(); delete this.mem[npcId]; this.saveMem(); this.setKnows(npcId, false); }
+  clear(npcId) { this.abortSummary(); this.convs[npcId] = []; delete this.mem[npcId]; this.save(); this.saveMem(); this.setKnows(npcId, false); }
   newConversation(npcId, periodKey) { this.clear(npcId); this.ensureGreeting(npcId, periodKey); }
-  clearAll() { this.abortSummary(); this.convs = {}; this.mem = {}; Store.clearConversationData(); this.saveMem(); }
+  clearAll() { this.abortSummary(); this.convs = {}; this.mem = {}; this.rel = {}; Store.clearConversationData(); this.saveMem(); Store.saveRelations(this.rel); }
 
   async send(npcId, rawText) {
     const text = rawText.trim().slice(0, CONFIG.context.maxInputChars);
@@ -49,6 +53,13 @@ export class Chat {
     try {
       const ctx = { ...(this.h.getContext?.(npcId) || {}) };
       ctx.memory = ctx.memoryOn === false ? '' : this.memoryOf(npcId);
+      // Introduction: the NPC learns who the player is only when the player says their name (or the user toggles it manually).
+      const pl = ctx.player || {};
+      const name = String(pl.name || '').trim();
+      if (!this.knows(npcId) && name && mentionsName(text, name)) { this.setKnows(npcId, true); this.h.onKnowsChange?.(npcId); }
+      const known = this.knows(npcId) && !!(name || pl.profile || pl.personality);
+      const recentNpc = list.filter((m) => m.role === 'assistant' && !m.greeting && m.content).slice(-2).map((m) => m.content);
+      ctx.playerView = known ? { name, profile: pl.profile || '', personality: pl.personality || '', mayCallName: !!name && nameCooldownOk(recentNpc, name) } : null;
       const { text: raw, truncated } = await this.llm.generate(buildMessages(npc, history, ctx), (t) => {
         reply.content = cleanReply(t, npc);
         this.h.onStream?.(npcId, reply.content);

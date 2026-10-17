@@ -29,6 +29,8 @@ export function loadSettings() {
 export const saveSettings = (s) => write('settings', s);
 export const loadCustom = () => read('custom', { world: '', npcs: {} });
 export const saveCustom = (c) => write('custom', c);
+export const loadRelations = () => read('relations', {});
+export const saveRelations = (r) => write('relations', r);
 export const loadMemory = () => read('memory', {});
 export const saveMemory = (m) => write('memory', m);
 export const loadConversations = () => read('conversations', {});

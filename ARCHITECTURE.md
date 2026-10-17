@@ -10,3 +10,4 @@
 - `version.js` — クラシックスクリプト（`index.html`と`importScripts`の両方で読める）。
 - `world.js` — 時間帯の判定。`customize.js` — 世界観/NPC追加設定の検証・JSON入出力（純粋関数）。`llm-prompts.js`は設定・時間・返答長をsystemプロンプトに合成し、途切れ整形(`finishCutoff`)も担う。
 - `memory.js` — 直近窓の選択と、未要約メッセージの抽出（純粋関数）。`chat.js`は要約（背景実行・中断可）と記憶の保持を担う。
+- `player.js` — 名乗りの検出と、名前を呼ぶ頻度の制御（純粋関数）。
