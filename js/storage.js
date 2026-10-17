@@ -7,6 +7,7 @@ const DEFAULT_SETTINGS = {
   model: 'lfm25-350m',   // selected model key (see config.js MODELS)
   timeMode: 'auto',      // 'auto' (device clock) | morning|day|evening|night|late
   replyLength: 'normal', // short|normal|long
+  memoryOn: true,        // fold old conversation into a short summary ("memory")
   autoLoad: false,       // load the selected model at startup (only if already downloaded)
   modelVersions: {}      // { [modelKey]: version string last loaded }
 };
@@ -28,6 +29,8 @@ export function loadSettings() {
 export const saveSettings = (s) => write('settings', s);
 export const loadCustom = () => read('custom', { world: '', npcs: {} });
 export const saveCustom = (c) => write('custom', c);
+export const loadMemory = () => read('memory', {});
+export const saveMemory = (m) => write('memory', m);
 export const loadConversations = () => read('conversations', {});
 export function saveConversations(c) {
   const trimmed = {};

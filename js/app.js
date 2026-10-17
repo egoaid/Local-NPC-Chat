@@ -18,7 +18,7 @@ if (!LENGTH_KEYS.includes(settings.replyLength)) settings.replyLength = 'normal'
 const NPC_IDS = NPCS.map((n) => n.id);
 let custom = sanitizeCustom(Store.loadCustom(), NPC_IDS);
 const nowTime = () => resolveTime(settings.timeMode);
-const getContext = (id) => ({ world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
+const getContext = (id) => ({ memoryOn: settings.memoryOn, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
 const speech = new Speech();
 speech.on = settings.speechOn; speech.rate = settings.rate;
 let modelReady = false;
@@ -27,6 +27,7 @@ const npcNow = () => getNpc(settings.selectedNpc);
 
 const chat = new Chat({
   getContext,
+  onSummarizing: (on) => { $('memory-status').textContent = on ? '記憶を整理中…' : ''; if (!on) syncMemoryUI(); refreshModelUI(); },
   onStream: (id, text) => { if (id === settings.selectedNpc) ui.streamUpdate(text); },
   onDone: (id) => { ui.setGenerating(false); ui.setChatEnabled(modelReady); refreshModelUI(); if (id === settings.selectedNpc) render(); },
   onError: (e) => { console.error(e); ui.toast('返事の生成に失敗しました。もう一度試してください。'); showDetails(e); }
@@ -76,6 +77,7 @@ async function send() {
   const reply = await p;
   ui.setGenerating(false); ui.setChatEnabled(modelReady); input.focus();
   if (reply && id === settings.selectedNpc) say(reply);
+  if (reply && settings.memoryOn) chat.maybeSummarize(id); // background; yields to the next message
 }
 
 const fmtMB = (b) => `${(b / 1048576).toFixed(0)}MB`;
@@ -101,7 +103,7 @@ async function refreshModelUI() {
     info: `${def.note} 状態: ${state}。サイズ: 約${def.approxMB}MB。${needF16Block ? ' ※この端末ではshader-f16が使えないため選べません。' : ''}${verWarn}`,
     showLoad: !isLoaded, loadDisabled: !gpuInfo.ok || needF16Block,
     loadLabel: st.cached ? `「${def.short}」を読み込む${loadedDef ? '（切り替え）' : ''}` : `「${def.short}」をダウンロードして読み込む（約${def.approxMB}MB）`,
-    showUnload: !!loadedDef, showDelete: st.cached, locked: busy || chat.generating
+    showUnload: !!loadedDef, showDelete: st.cached, locked: busy || chat.busy
   });
   const est = await LLM.storageEstimate();
   $('storage-info').textContent = est ? `ブラウザの保存領域: ${fmtMB(est.usage)} 使用 / 上限の目安 ${fmtMB(est.quota)}` : '';
@@ -142,7 +144,7 @@ async function doLoad(def, { silent = false } = {}) {
 
 /** Switch/load: releases the current model first, then loads `def`. Rolls back once if the new load fails. */
 async function switchTo(def, opts) {
-  if (busy || chat.generating || !gpuInfo.ok) return;
+  if (busy || chat.busy || !gpuInfo.ok) { if (chat.summarizing) ui.toast('記憶を整理中です。少し待ってからもう一度お試しください。'); return; }
   busy = true; await refreshModelUI();
   const prev = loadedDef;
   modelReady = false; ui.setChatEnabled(false); loadedDef = null;
@@ -160,7 +162,7 @@ async function switchTo(def, opts) {
 }
 
 async function unloadNow(reason) {
-  if (busy || chat.generating || !loadedDef) return;
+  if (busy || chat.busy || !loadedDef) { if (reason === 'idle' && loadedDef && document.hidden) idleTimer = setTimeout(() => unloadNow('idle'), 30000); return; }
   busy = true;
   const d = loadedDef; releasedDef = reason === 'idle' ? d : null;
   loadedDef = null; modelReady = false; ui.setChatEnabled(false);
@@ -187,7 +189,12 @@ function updateTimeBadge() {
 }
 let saveTimer = null, statusTimer = null;
 function setStatus(msg) { const el = $('custom-status'); el.textContent = msg; clearTimeout(statusTimer); statusTimer = setTimeout(() => { el.textContent = ''; }, 6000); }
+function syncMemoryUI() {
+  $('memory-npc-name').textContent = npcNow().name;
+  $('txt-memory').value = chat.memoryOf(settings.selectedNpc);
+}
 function syncCustomUI() {
+  syncMemoryUI(); $('chk-memory').checked = settings.memoryOn;
   const npc = npcNow();
   $('custom-npc-name').textContent = npc.name;
   $('txt-world').value = custom.world; $('txt-npc').value = custom.npcs[npc.id] || '';
@@ -210,6 +217,8 @@ function wireCustom() {
   $('sel-time').addEventListener('change', (e) => { settings.timeMode = e.target.value; save(); updateTimeBadge(); });
   $('sel-length').addEventListener('change', (e) => { settings.replyLength = e.target.value; save(); });
   setInterval(updateTimeBadge, 30000);
+  $('chk-memory').addEventListener('change', (e) => { settings.memoryOn = e.target.checked; save(); });
+  $('btn-clear-memory').addEventListener('click', () => { chat.clearMemory(settings.selectedNpc); syncMemoryUI(); setStatus('この住人の記憶を消しました（会話の履歴は残っています）。'); });
   $('btn-export-settings').addEventListener('click', () => {
     const data = buildExport({ custom, timeMode: settings.timeMode, replyLength: settings.replyLength, appVersion: APP.version });
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });

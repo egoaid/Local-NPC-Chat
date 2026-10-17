@@ -91,7 +91,7 @@ function buildInputs(messages) {
 }
 
 /** Returns {text, truncated}: truncated=true if the token limit was hit, false if not, null if unknown. */
-export async function generate(messages, onText, { maxNewTokens } = {}) {
+export async function generate(messages, onText, { maxNewTokens, temperature } = {}) {
   if (!model) throw new Error('model-not-loaded');
   const inputs = buildInputs(messages);
   stopper = new T.InterruptableStoppingCriteria();
@@ -105,7 +105,7 @@ export async function generate(messages, onText, { maxNewTokens } = {}) {
   let truncated = null;
   try {
     const out = await model.generate({
-      ...inputs, max_new_tokens: limit, do_sample: true, temperature: g.temperature,
+      ...inputs, max_new_tokens: limit, do_sample: true, temperature: temperature ?? g.temperature,
       top_k: g.topK, repetition_penalty: g.repetitionPenalty, streamer, stopping_criteria: stopper
     });
     try {

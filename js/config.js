@@ -31,7 +31,8 @@ export const LENGTHS = Object.freeze({
 export const CONFIG = Object.freeze({
   cacheName: 'transformers-cache', // Cache Storage name used by Transformers.js (holds downloaded models)
   idleReleaseMs: 5 * 60 * 1000,    // release GPU memory after the tab has been hidden this long
-  context: Object.freeze({ maxTurns: 6, maxStoredMessages: 40, maxInputChars: 400 }),
+  context: Object.freeze({ historyChars: 1500, maxMessages: 24, maxStoredMessages: 60, maxInputChars: 400 }),
+  memory: Object.freeze({ minPending: 4, maxChunk: 10, maxNewTokens: 130, maxChars: 300, temperature: 0.2 }),
   update: Object.freeze({ intervalMs: 30 * 60 * 1000, versionUrl: 'version.json' }),
   speech: Object.freeze({ minRate: 0.6, maxRate: 1.6, defaultRate: 1.0 }),
   storagePrefix: 'lnpc:',
