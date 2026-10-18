@@ -133,6 +133,43 @@
     </details>
   </section>
 
+  <section class="card group-card" aria-labelledby="bench-h">
+    <details>
+      <summary id="bench-h">ベンチマーク（モデルの性能を測る）</summary>
+      <p class="muted small">使用中のモデルが、しりとりと物語づくりをどれだけ正しくできるかを測ります。住人の設定は使わず、モデルどうしを公平に比べられるよう、同じ条件の「AIどうし」で行います（しりとりの開始語は毎回同じ）。結果はこの端末に保存されます。モデルを切り替えて何度か測ると、下の表で比べられます。辞書は使わないので、言葉が実在するかは判定できません（あなたの目で「意味不明」を付けられます）。</p>
+      <p id="bench-model" class="small"></p>
+      <label>テスト
+        <select id="sel-btest"><option value="shiritori">しりとり（AIどうし）</option><option value="story">物語づくり（AIどうし）</option></select>
+      </label>
+      <div id="b-shiri-opts">
+        <label>ゲーム数 <select id="sel-bgames"><option>3</option><option selected>5</option><option>10</option></select></label>
+        <label>やり直し回数（規則違反のとき） <select id="sel-bretries"><option value="0">0（一発勝負）</option><option value="1" selected>1</option><option value="2">2</option></select></label>
+        <label class="toggle"><input id="chk-bstrict" type="checkbox"> 濁点を区別する（厳密。「ご」の次は「ご」だけ）</label>
+      </div>
+      <div id="b-story-opts" hidden>
+        <label>お題 <select id="sel-btitle"></select></label>
+        <label>物語の数 <select id="sel-bstories"><option>1</option><option selected>3</option><option>5</option></select></label>
+        <label>長さ <select id="sel-bturns"><option value="8">8発言</option><option value="12" selected>12発言</option></select></label>
+        <label>やり直し回数（短すぎ・繰り返しのとき） <select id="sel-bsretries"><option value="0" selected>0（そのまま）</option><option value="1">1</option></select></label>
+      </div>
+      <label>温度（ばらつき。高いほど自由） <select id="sel-btemp"><option value="0.3">0.3（堅い）</option><option value="0.7" selected>0.7</option><option value="1">1.0（自由）</option></select></label>
+      <div class="row">
+        <button id="btn-brun" type="button">測定を開始</button>
+        <button id="btn-bstop" type="button" class="danger" hidden>中断</button>
+      </div>
+      <p id="b-status" class="muted small" role="status"></p>
+      <h3 class="b-h">結果の比較</h3>
+      <div id="bench-summary" class="table-wrap"></div>
+      <p class="muted small">しりとり：「平均連鎖」は、最初から続けて一発で正解した回数の平均です。「初回成功率」は、やり直しなしで規則に合っていた割合です。物語：「反復」は直前までの発言との近さ（0〜1、低いほどよい）、「継続」は前に出た語を使い続けた度合い（高すぎる＝同じことの繰り返し）です。どれも目安で、物語の質は★（あなたの評価）が最も確かです。</p>
+      <details><summary>実行ごとの記録（意味不明の印・★評価・削除）</summary><div id="bench-runs"></div></details>
+      <div class="row">
+        <button id="btn-bexport" type="button" class="secondary">結果を書き出す(JSON)</button>
+        <button id="btn-bcsv" type="button" class="secondary">CSVで書き出す</button>
+        <button id="btn-bclear" type="button" class="danger">結果をすべて削除</button>
+      </div>
+    </details>
+  </section>
+
   <section class="card custom-card" aria-labelledby="custom-h">
     <details>
       <summary id="custom-h">世界とプレイヤーの設定（時間・世界観・あなたの設定・返答の長さ・記憶）</summary>

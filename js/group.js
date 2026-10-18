@@ -1,7 +1,7 @@
 // Group modes: characters talk to each other (improvised story / shiritori).
 // Designed to be light: one speaker at a time, tiny prompts, tiny outputs, rules checked by code.
 import { cleanReply, finishCutoff } from './llm-prompts.js';
-import { validateWord, parseWordAnswer, lastSound, toHiragana, isKanaOnly, REASON_JA, STARTERS } from './kana.js';
+import { validateWord, parseKanaAnswer, lastSound, toHiragana, isKanaOnly, REASON_JA, STARTERS } from './kana.js';
 
 export const GROUP = Object.freeze({
   maxParticipants: 4, titleMax: 40, directiveMax: 80,
@@ -37,7 +37,10 @@ const similar = (a, b) => { // cheap near-duplicate check (character bigrams)
 
 export class GroupSession {
   /** generate(messages, {maxNewTokens, temperature}) -> {text, truncated, aborted?} | null (null = engine busy, try again) */
-  constructor({ mode, characters, title = '', maxTurns = GROUP.story.defaultTurns, includePlayer = false, playerName = 'あなた', generate, rand = Math.random }) {
+  /** opts (benchmark/analysis): retries (0-2, default 1), lenient (dakuten treated as the same sound, default true),
+   *  temperature (override), personaless (story: narrators have only a name). */
+  constructor({ mode, characters, title = '', maxTurns = GROUP.story.defaultTurns, includePlayer = false, playerName = 'あなた', generate, rand = Math.random, retries = 1, lenient = true, temperature = null, personaless = false }) {
+    this.retries = Math.max(0, Math.min(2, retries)); this.lenient = lenient; this.temperature = temperature; this.personaless = personaless; this.attempts = [];
     this.mode = mode; this.title = clip(title, GROUP.titleMax); this.maxTurns = maxTurns; this.generate = generate; this.rand = rand;
     this.lines = []; this.turn = 0; this.ended = false; this.started = false; this.directive = '';
     const order = [...characters].sort(() => rand() - 0.5);
@@ -52,7 +55,7 @@ export class GroupSession {
     const stage = stageFor(this.turn, this.maxTurns);
     const last = this.turn >= this.maxTurns - 1;
     const sys = [
-      `あなたは${slimPersona(speaker)}`,
+      `あなたは${this.personaless ? speaker.name : slimPersona(speaker)}`,
       `複数人で、物語『${this.title}』を1人ずつ即興で語り継いでいます。`,
       `【いまの場面】${STAGES[stage]}`,
       '【ルール】',
@@ -77,18 +80,22 @@ export class GroupSession {
   async stepStory() {
     const speaker = this.current();
     let text = '';
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
       const msgs = this.storyMessages(speaker);
       if (attempt) msgs[1].content += '\n（直前と違う展開にしてください。）';
-      const r = await this.generate(msgs, { maxNewTokens: GROUP.story.maxNewTokens, temperature: GROUP.story.temperature });
+      const t0 = Date.now();
+      const r = await this.generate(msgs, { maxNewTokens: GROUP.story.maxNewTokens, temperature: this.temperature ?? GROUP.story.temperature });
+      const ms = Date.now() - t0;
       if (!r) return { type: 'busy' };
       if (this.ended) return { type: 'stopped' };
       if (r.aborted) return { type: 'aborted' };
-      text = cleanReply(r.text, speaker).replace(new RegExp(`^${speaker.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*[：:]\\s*`), '');
+      text = cleanReply(r.text, speaker); // also strips a leading "name：" label
       if (r.truncated !== false) text = finishCutoff(text, { markIfNoBreak: r.truncated === true });
       const prev = this.lines.filter((l) => l.kind === 'npc').at(-1);
-      if (text.length >= 4 && !(prev && similar(text, prev.text))) break;
-      if (attempt) { if (text.length < 4) text = '……'; }
+      const reason = text.length < 4 ? 'short' : (prev && similar(text, prev.text)) ? 'duplicate' : null;
+      this.attempts.push({ turn: this.turn, speaker: speaker.name, attempt, reason, ms, newTokens: r.newTokens ?? null, promptTokens: r.promptTokens ?? null, raw: String(r.text || '').slice(0, 300) });
+      if (!reason) break;
+      if (attempt === this.retries && text.length < 4) text = '……';
     }
     const line = this.push({ kind: 'npc', speakerId: speaker.id, name: speaker.name, text });
     this.turn++;
@@ -100,7 +107,7 @@ export class GroupSession {
   shiritoriMessages(speaker, feedback = '') {
     const used = [...this.used].slice(-GROUP.shiritori.usedShown);
     return [
-      { role: 'system', content: 'しりとりのゲームです。指定された音で始まる名詞（物や生き物や場所の普通の名前）を1つだけ答えます。「ん」で終わる言葉と、すでに使われた言葉は禁止です。出力は「ことば|ひらがなのよみ」の形式だけ。例: りんご|りんご / 空|そら' },
+      { role: 'system', content: 'しりとりのゲームです。指定された音で始まる名詞（物や生き物や場所の普通の名前）を1つだけ、ひらがなだけで答えます。「ん」で終わる言葉と、すでに使われた言葉は禁止です。説明は書かず、ひらがなの言葉だけを出力します。例: りんご' },
       { role: 'user', content: `「${this.required}」から始まる言葉。使用済み: ${used.join('、') || 'なし'}${feedback}` }
     ];
   }
@@ -136,20 +143,23 @@ export class GroupSession {
     }
     const speaker = this.current();
     if (speaker.isPlayer) return { type: 'wait-player', required: this.required };
-    let feedback = '', last = null, nWord = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      const r = await this.generate(this.shiritoriMessages(speaker, feedback), { maxNewTokens: GROUP.shiritori.maxNewTokens, temperature: GROUP.shiritori.temperature });
+    let feedback = '', nWord = null;
+    for (let attempt = 0; attempt <= this.retries; attempt++) {
+      const t0 = Date.now();
+      const r = await this.generate(this.shiritoriMessages(speaker, feedback), { maxNewTokens: GROUP.shiritori.maxNewTokens, temperature: this.temperature ?? GROUP.shiritori.temperature });
+      const ms = Date.now() - t0;
       if (!r) return { type: 'busy' };
       if (this.ended) return { type: 'stopped' };
       if (r.aborted) return { type: 'aborted' };
-      const a = parseWordAnswer(r.text);
-      const v = a.reading ? validateWord(a.reading, { required: this.required, used: this.used }) : { ok: false, reason: 'not-kana' };
-      if (v.ok && !v.loses) return this.accept(speaker, a.word || v.reading, v);
-      if (v.ok && v.loses && !nWord) nWord = { a, v }; // an "ん" ending gets one chance to be fixed
-      last = { a, v };
+      const a = parseKanaAnswer(r.text);
+      const v = a.reading ? validateWord(a.reading, { required: this.required, used: this.used, lenient: this.lenient }) : { ok: false, reason: a.word ? 'not-kana' : 'empty' };
+      const reason = !v.ok ? v.reason : v.loses ? 'ends-n' : null;
+      this.attempts.push({ turn: this.turn, speaker: speaker.name, attempt, required: this.required, word: a.word, raw: a.raw.slice(0, 80), reason, noisy: a.noisy, ms, newTokens: r.newTokens ?? null, promptTokens: r.promptTokens ?? null });
+      if (!reason) return this.accept(speaker, a.word, v);
+      if (reason === 'ends-n' && !nWord) nWord = { a, v }; // an "ん" ending gets a chance to be fixed (if retries remain)
       feedback = `\n（前の答え「${a.word}」は${v.ok ? '「ん」で終わっています' : REASON_JA[v.reason] || '使えません'}。別の言葉を答えてください。）`;
     }
-    if (nWord) return this.accept(speaker, nWord.a.word || nWord.v.reading, nWord.v); // could not fix it: the "ん" word stands
+    if (nWord) return this.accept(speaker, nWord.a.word, nWord.v); // could not fix it: the "ん" word stands
     return this.lose(speaker, '言葉が思いつきませんでした');
   }
 
@@ -160,7 +170,7 @@ export class GroupSession {
     const r = toHiragana(clip(text, 30)).replace(/[「」『』\s]/g, '');
     if (!r) return { ok: false, error: '言葉を入力してください。' };
     if (!isKanaOnly(r)) return { ok: false, error: 'ひらがな（またはカタカナ）で入力してください。' };
-    const v = validateWord(r, { required: this.required, used: this.used });
+    const v = validateWord(r, { required: this.required, used: this.used, lenient: this.lenient });
     if (!v.ok) return { ok: false, error: `${REASON_JA[v.reason]}。「${this.required}」から始まる別の言葉を。` };
     return { ok: true, result: this.accept(speaker, r, v) };
   }

@@ -8,6 +8,7 @@ import * as ui from './ui.js';
 import { resolveTime, resolveDate, parseFixedDate, PERIOD_KEYS } from './world.js';
 import { nextDelay, pickSpeaker, blockReason, INTERVAL_KEYS } from './proactive.js';
 import { GroupSession, GROUP } from './group.js';
+import { analyzeShiritori, analyzeStory, aggregate, toCSV, seededRand, BENCH_TITLES, VIOLATIONS, BENCH_SCHEMA } from './bench.js';
 import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer } from './customize.js';
 import { MAX_CHARACTERS, CLIMITS, SOFT_TOTAL_CHARS, blankCharacter, sanitizeCharacter, validateCharacter, newCharacterId, promptChars } from './characters.js';
 import { SAMPLES, characterFromSample } from './samples.js';
@@ -150,7 +151,7 @@ function classify(e, def) {
 }
 
 async function refreshModelUI() {
-  updateGroupUI();
+  updateGroupUI(); updateBenchUI();
   const def = selectedDef();
   const st = await LLM.getCacheStatus(def);
   const isLoaded = loadedDef?.key === def.key;
@@ -207,7 +208,7 @@ async function doLoad(def, { silent = false } = {}) {
 
 /** Switch/load: releases the current model first, then loads `def`. Rolls back once if the new load fails. */
 async function switchTo(def, opts) {
-  if (busy || chat.busy || !gpuInfo.ok) { if (chat.summarizing) ui.toast('記憶を整理中です。少し待ってからもう一度お試しください。'); return; }
+  if (busy || chat.busy || benchRunning || !gpuInfo.ok) { if (benchRunning) ui.toast('ベンチマークの実行中は、モデルを切り替えられません。'); else if (chat.summarizing) ui.toast('記憶を整理中です。少し待ってからもう一度お試しください。'); return; }
   busy = true; await refreshModelUI();
   const prev = loadedDef;
   modelReady = false; ui.setChatEnabled(false); loadedDef = null;
@@ -225,7 +226,7 @@ async function switchTo(def, opts) {
 }
 
 async function unloadNow(reason) {
-  if (busy || chat.busy || !loadedDef) { if (reason === 'idle' && loadedDef && document.hidden) idleTimer = setTimeout(() => unloadNow('idle'), 30000); return; }
+  if (busy || chat.busy || benchRunning || groupActive() || !loadedDef) { if (reason === 'idle' && loadedDef && document.hidden) idleTimer = setTimeout(() => unloadNow('idle'), 30000); return; }
   busy = true;
   const d = loadedDef; releasedDef = reason === 'idle' ? d : null;
   loadedDef = null; modelReady = false; ui.setChatEnabled(false);
@@ -258,7 +259,7 @@ function startProactive() {
 }
 async function tickProactive() {
   proactiveTimer = null;
-  const reason = blockReason({ enabled: settings.proactiveOn, modelReady, hidden: document.hidden, busy: busy || chat.busy, typing: $('input').value.trim() !== '', streak: proactiveStreak, characters: characters.length > 0, groupActive: groupActive() });
+  const reason = blockReason({ enabled: settings.proactiveOn, modelReady, hidden: document.hidden, busy: busy || chat.busy, typing: $('input').value.trim() !== '', streak: proactiveStreak, characters: characters.length > 0, groupActive: groupActive() || benchRunning });
   if (['disabled', 'no-characters', 'model-not-ready', 'streak-limit'].includes(reason)) return; // restarted by an event (model ready / toggle / the player writes)
   if (reason) return scheduleProactive(PROACTIVE.retryMs);
   startupDone = true;
@@ -496,12 +497,15 @@ function pauseGroup(msg) { if (!group || group.state === 'finished') return; gro
 function finishGroup(result) {
   if (!group) return; group.state = 'finished';
   const s = group.session;
-  setGStatus(s.mode === 'story' ? 'おしまい。「テキストで保存」で物語を残せます。' : result?.reason === 'lost' ? `ゲーム終了（${s.order.find((p) => p.id === result.loser)?.name || ''}の負け）。` : 'ゲーム終了。');
+  let msg = s.mode === 'story' ? 'おしまい。「テキストで保存」で物語を残せます。' : result?.reason === 'lost' ? `ゲーム終了（${s.order.find((p) => p.id === result.loser)?.name || ''}の負け）。` : 'ゲーム終了。';
+  if (s.mode === 'shiritori' && s.attempts.length) { const m = analyzeShiritori(s.attempts, {}); msg += ` AIの初回成功率 ${pct(m.firstTryRate)}・規則違反 ${Object.values(m.violations).reduce((a, b) => a + b, 0)}回。`; }
+  setGStatus(msg);
   updateGroupUI(); refreshModelUI();
 }
 function startGroup() {
   if (groupActive()) return;
   if (!modelReady) return setGStatus('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
+  if (benchRunning) return setGStatus('ベンチマークの実行中です。');
   if (chat.busy) return setGStatus('いまは別の処理中です。少し待ってからもう一度お試しください。');
   const mode = $('sel-gmode').value, chars = [...gSelected].map(charById).filter(Boolean);
   const withPlayer = mode === 'shiritori' && $('chk-gplayer').checked;
@@ -577,6 +581,156 @@ function wireGroup() {
   $('btn-gcopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(group.session.exportText()); ui.toast('コピーしました。'); } catch { ui.toast('コピーできませんでした。'); } });
   document.addEventListener('visibilitychange', () => { if (document.hidden && group?.state === 'running') group.pauseRequested = true; });
   updateGroupUI();
+}
+
+// ---- benchmark: measure how well the loaded model plays shiritori / builds a story (no dictionary, AI vs AI) ----
+let benchRunning = false, benchAbort = false;
+const bench = Store.loadBench();
+const setBStatus = (t) => { $('b-status').textContent = t; };
+const pct = (v) => (v === null || v === undefined || Number.isNaN(v) ? '—' : `${Math.round(v * 100)}%`);
+const num = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? '—' : Number(v).toFixed(d));
+
+function updateBenchUI() {
+  if (!$('sel-btest')) return;
+  const t = $('sel-btest').value;
+  $('b-shiri-opts').hidden = t !== 'shiritori'; $('b-story-opts').hidden = t !== 'story';
+  $('bench-model').textContent = loadedDef ? `測定するモデル: ${loadedDef.label}（${loadedDef.dtype}・${LLM.backendInfo().mode === 'worker' ? '別スレッド' : 'メインスレッド'}）` : '測定するモデル: （未読み込み。画面下の「ローカルAIモデル」で読み込んでください）';
+  $('btn-brun').hidden = benchRunning; $('btn-brun').disabled = !modelReady || groupActive(); $('btn-bstop').hidden = !benchRunning;
+  for (const id of ['sel-btest', 'sel-bgames', 'sel-bretries', 'chk-bstrict', 'sel-btitle', 'sel-bstories', 'sel-bturns', 'sel-bsretries', 'sel-btemp']) $(id).disabled = benchRunning;
+}
+function newBenchSession(test, i, temperature) {
+  const generate = (m, o) => chat.generateExclusive(m, o);
+  if (test === 'shiritori') {
+    return new GroupSession({ mode: 'shiritori', characters: [{ id: 'a', name: 'AI-A' }, { id: 'b', name: 'AI-B' }], generate, rand: seededRand(1000 + i),
+      retries: Number($('sel-bretries').value), lenient: !$('chk-bstrict').checked, temperature });
+  }
+  return new GroupSession({ mode: 'story', characters: [{ id: 'a', name: '語り手A' }, { id: 'b', name: '語り手B' }], title: $('sel-btitle').value, maxTurns: Number($('sel-bturns').value),
+    generate, rand: seededRand(2000 + i), retries: Number($('sel-bsretries').value), temperature, personaless: true });
+}
+async function playBench(session, onProgress) {
+  let busyTries = 0;
+  for (let n = 0; n < 400; n++) {
+    if (benchAbort) { session.stop(); return { ok: false, why: '中断しました。' }; }
+    let r;
+    try { r = await session.step(); } catch (e) { console.error(e); showDetails(e); return { ok: false, why: '生成でエラーが出たため、中断しました。' }; }
+    if (r.type === 'stopped') return { ok: false, why: '中断しました。' };
+    if (r.type === 'busy') { if (++busyTries > 40) return { ok: false, why: '他の処理が長引いているため、中断しました。' }; await sleep(500); continue; }
+    busyTries = 0;
+    if (r.type === 'aborted') return { ok: false, why: benchAbort ? '中断しました。' : 'チャットを送ったため、中断しました。' };
+    onProgress(session);
+    if (r.type === 'end') return { ok: true, result: r.result };
+    await sleep(0);
+  }
+  session.stop(); return { ok: false, why: '想定より長く続いたため、中断しました。' };
+}
+function recordRun(test, session, params, result) {
+  const lines = session.lines.filter((l) => l.kind === 'npc');
+  const run = {
+    id: `r_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: new Date().toISOString(), appVersion: APP.version,
+    model: { key: loadedDef.key, id: loadedDef.id, dtype: loadedDef.dtype, short: loadedDef.short }, backend: LLM.backendInfo().mode, test, params,
+    transcript: session.lines.map((l) => ({ kind: l.kind, name: l.name, text: l.text, reading: l.reading })),
+    attempts: session.attempts.map(({ turn, speaker, attempt, required, word, reason, noisy, ms, newTokens }) => ({ turn, speaker, attempt, required, word, reason, noisy, ms, newTokens }))
+  };
+  if (test === 'shiritori') {
+    run.words = lines.map((l) => ({ word: l.text.replace(/[「」]/g, ''), reading: l.reading })); run.nonsense = [];
+    const endedBy = result.reason === 'lost' ? result.how : result.reason === 'limit' ? 'limit' : 'stopped';
+    run.metrics = analyzeShiritori(session.attempts, { endedBy, validWords: run.words, retries: session.retries, lenient: session.lenient });
+  } else {
+    run.ratings = { coherence: null, naturalness: null, interest: null };
+    run.metrics = analyzeStory(lines, session.attempts, { retries: session.retries, temperature: session.temperature, title: session.title, maxTurns: session.maxTurns });
+  }
+  bench.push(run); if (bench.length > 200) bench.splice(0, bench.length - 200);
+  Store.saveBench(bench);
+}
+async function runBench() {
+  if (benchRunning || groupActive()) return;
+  if (!modelReady || !loadedDef) return setBStatus('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
+  if (chat.busy) return setBStatus('いまは別の処理中です。少し待ってからもう一度お試しください。');
+  const test = $('sel-btest').value, temperature = Number($('sel-btemp').value);
+  const total = Number(test === 'shiritori' ? $('sel-bgames').value : $('sel-bstories').value);
+  benchRunning = true; benchAbort = false; updateBenchUI(); refreshModelUI();
+  const params = { temperature, retries: Number(test === 'shiritori' ? $('sel-bretries').value : $('sel-bsretries').value), lenient: !$('chk-bstrict').checked, ...(test === 'story' ? { title: $('sel-btitle').value, maxTurns: Number($('sel-bturns').value) } : {}) };
+  let done = 0, why = '';
+  try {
+    for (let i = 1; i <= total; i++) {
+      const session = newBenchSession(test, i, temperature);
+      const out = await playBench(session, (ss) => setBStatus(`${i}/${total}本目を測定中…（${test === 'shiritori' ? `${ss.words}語` : `${ss.lines.length}発言`}）`));
+      if (!out.ok) { why = out.why; break; }
+      recordRun(test, session, params, out.result); done++; renderBench();
+    }
+  } finally { benchRunning = false; benchAbort = false; updateBenchUI(); refreshModelUI(); }
+  setBStatus(why ? `${why}（${done}本ぶんを記録しました）` : `完了しました（${done}本を記録）。下の表で結果を確認できます。`);
+  renderBench();
+}
+function table(caption, headers, rows) {
+  const t = document.createElement('table'); t.className = 'btable';
+  const c = document.createElement('caption'); c.textContent = caption; t.appendChild(c);
+  const h = document.createElement('tr'); for (const x of headers) { const th = document.createElement('th'); th.textContent = x; h.appendChild(th); } t.appendChild(h);
+  for (const r of rows) { const tr = document.createElement('tr'); for (const x of r) { const td = document.createElement('td'); td.textContent = x; tr.appendChild(td); } t.appendChild(tr); }
+  return t;
+}
+const topViol = (v) => Object.entries(v || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, x]) => `${VIOLATIONS[k] || k} ${pct(x)}`).join(' / ') || 'なし';
+const star = (v) => (v === null || v === undefined ? '—' : `${num(v)}★`);
+function renderBench() {
+  const rows = aggregate(bench), box = $('bench-summary'); box.textContent = '';
+  const sr = rows.filter((r) => r.test === 'shiritori'), st = rows.filter((r) => r.test === 'story');
+  if (!rows.length) { box.textContent = 'まだ結果がありません。「測定を開始」を押してください。'; }
+  if (sr.length) box.appendChild(table('しりとり', ['モデル', '回数', '平均連鎖', '平均語数', '初回成功率', '余計な出力', '主な違反（全回答に対する割合）', '意味不明(印)', '平均ms', '出力tok'],
+    sr.map((r) => [r.model, r.runs, num(r.avgChain), num(r.avgWords), pct(r.firstTryRate), pct(r.noisyRate), topViol(r.violations), pct(r.nonsenseRate), r.avgMs === null ? '—' : Math.round(r.avgMs), num(r.avgTokens)])));
+  if (st.length) box.appendChild(table('物語づくり', ['モデル', '回数', '完走', '日本語率', '文末完結', '反復↓', '継続', '自己言及', '一貫性', '自然さ', '面白さ', '平均ms', '出力tok'],
+    st.map((r) => [r.model, r.runs, pct(r.completionRate), pct(r.jaRatio), pct(r.completeRate), num(r.repeatScore, 2), num(r.continuity, 2), r.selfRef, star(r.coherence), star(r.naturalness), star(r.interest), r.avgMs === null ? '—' : Math.round(r.avgMs), num(r.avgTokens)])));
+  const list = $('bench-runs'); list.textContent = '';
+  for (const run of [...bench].reverse().slice(0, 60)) list.appendChild(runView(run));
+}
+function runView(run) {
+  const m = run.metrics, d = document.createElement('details'); d.className = 'brun';
+  const when = new Date(run.ts).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const sm = document.createElement('summary');
+  sm.textContent = run.test === 'shiritori' ? `${when}・${run.model.short}・しりとり：連鎖${m.chain}／${m.validWords}語／初回${pct(m.firstTryRate)}／終了:${m.endedBy}` : `${when}・${run.model.short}・物語『${m.title}』：${m.lines}発言／日本語${pct(m.jaRatio)}／反復${num(m.repeatScore, 2)}`;
+  d.appendChild(sm);
+  if (run.test === 'shiritori') {
+    const chips = document.createElement('div');
+    run.words.forEach((w, i) => {
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = w.word + (w.reading && w.reading !== w.word ? `（${w.reading}）` : '');
+      b.setAttribute('aria-pressed', String(run.nonsense.includes(i)));
+      b.addEventListener('click', () => { const k = run.nonsense.indexOf(i); if (k >= 0) run.nonsense.splice(k, 1); else run.nonsense.push(i); b.setAttribute('aria-pressed', String(k < 0)); Store.saveBench(bench); renderBenchSummaryOnly(); });
+      chips.appendChild(b);
+    });
+    const hint = document.createElement('p'); hint.className = 'muted small'; hint.textContent = '意味不明な言葉をタップすると印が付き、「意味不明(印)」の割合に反映されます。';
+    const viol = run.attempts.filter((a) => a.reason).map((a) => `ターン${a.turn + 1} ${a.speaker}「${a.word || '（空）'}」（必要: ${a.required || '—'}）→ ${VIOLATIONS[a.reason] || a.reason}`);
+    const pre = document.createElement('pre'); pre.textContent = viol.length ? `規則違反の記録:\n${viol.join('\n')}` : '規則違反はありませんでした。';
+    d.append(hint, chips, pre);
+  } else {
+    const pre = document.createElement('pre'); pre.textContent = run.transcript.map((l) => (l.kind === 'system' ? `（${l.text}）` : `${l.name}：${l.text}`)).join('\n'); d.appendChild(pre);
+    const row = document.createElement('div'); row.className = 'row';
+    for (const [key, label] of [['coherence', '一貫性'], ['naturalness', '自然さ'], ['interest', '面白さ']]) {
+      const lab = document.createElement('label'); lab.textContent = `${label} `; const sel = document.createElement('select');
+      sel.add(new Option('—', '')); for (let n = 1; n <= 5; n++) sel.add(new Option('★'.repeat(n), String(n)));
+      sel.value = run.ratings[key] === null || run.ratings[key] === undefined ? '' : String(run.ratings[key]);
+      sel.addEventListener('change', () => { run.ratings[key] = sel.value ? Number(sel.value) : null; Store.saveBench(bench); renderBenchSummaryOnly(); });
+      lab.appendChild(sel); row.appendChild(lab);
+    }
+    d.appendChild(row);
+  }
+  const del = document.createElement('button'); del.type = 'button'; del.className = 'secondary'; del.textContent = 'この記録を削除';
+  del.addEventListener('click', () => { if (!confirm('この記録を削除しますか？')) return; const i = bench.findIndex((r) => r.id === run.id); if (i >= 0) bench.splice(i, 1); Store.saveBench(bench); renderBench(); });
+  d.appendChild(del);
+  return d;
+}
+function renderBenchSummaryOnly() { const keep = $('bench-runs'); const scroll = keep.scrollTop; const open = [...keep.querySelectorAll('details')].map((x) => x.open); renderBench(); [...$('bench-runs').querySelectorAll('details')].forEach((x, i) => { x.open = !!open[i]; }); $('bench-runs').scrollTop = scroll; }
+function wireBench() {
+  const sel = $('sel-btitle'); sel.textContent = ''; for (const t of BENCH_TITLES) sel.add(new Option(t, t));
+  $('sel-btest').addEventListener('change', updateBenchUI);
+  $('btn-brun').addEventListener('click', runBench);
+  $('btn-bstop').addEventListener('click', () => { benchAbort = true; chat.abortExclusive(); setBStatus('中断しています…'); });
+  $('btn-bexport').addEventListener('click', () => downloadJson({ schema: BENCH_SCHEMA, schemaVersion: 1, appVersion: APP.version, exportedAt: new Date().toISOString(), runs: bench }, `local-npc-chat-bench-${stamp()}.json`));
+  $('btn-bcsv').addEventListener('click', () => {
+    const blob = new Blob(['\uFEFF', toCSV(bench)], { type: 'text/csv' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `local-npc-chat-bench-${stamp()}.csv`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $('btn-bclear').addEventListener('click', () => { if (!bench.length || !confirm(`ベンチマークの結果（${bench.length}件）をすべて削除します。よろしいですか？`)) return; bench.length = 0; Store.saveBench(bench); renderBench(); });
+  updateBenchUI(); renderBench();
 }
 
 // ---- backup / data ----
@@ -693,7 +847,7 @@ async function registerSW(checker) {
 async function init() {
   $('ver').textContent = APP.version;
   document.title = `${APP.appName} v${APP.version}`;
-  wire(); wireCustom(); wireCharacters(); wireGroup(); ui.setGenerating(false); ui.setChatEnabled(false);
+  wire(); wireCustom(); wireCharacters(); wireGroup(); wireBench(); ui.setGenerating(false); ui.setChatEnabled(false);
   refreshNpcList();
   speech.onVoices = refreshVoices;
   selectNpc(settings.selectedNpc);

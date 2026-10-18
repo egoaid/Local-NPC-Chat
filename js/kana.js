@@ -40,18 +40,32 @@ export const REASON_JA = Object.freeze({
 
 /** reading: string, required: sound the word must start with (null for the very first word), used: Set of readings.
  *  Returns {ok:true, reading, last, loses} (loses = ends with ん) or {ok:false, reason}. */
-export function validateWord(reading, { required = null, used = new Set() } = {}) {
+export function validateWord(reading, { required = null, used = new Set(), lenient = true } = {}) {
   const r = toHiragana(reading).replace(/[\s・]/g, '');
   if (!r) return { ok: false, reason: 'empty' };
   if (!isKanaOnly(r)) return { ok: false, reason: 'not-kana' };
   if ([...r].length < 2) return { ok: false, reason: 'too-short' };
   const first = firstSound(r);
   if (!first) return { ok: false, reason: 'wrong-start' };
-  if (required && baseKana(first) !== baseKana(required)) return { ok: false, reason: 'wrong-start' };
+  if (required && (lenient ? baseKana(first) !== baseKana(required) : first !== required)) return { ok: false, reason: 'wrong-start' };
   if (used.has(r)) return { ok: false, reason: 'used' };
   const last = lastSound(r);
   if (!last) return { ok: false, reason: 'bad-ending' };
   return { ok: true, reading: r, last, loses: last === 'ん' };
+}
+
+/** Hiragana-only answer format: the first line is the word. Format drift ("ことば|よみ", extra lines, long text) is parsed but flagged `noisy`.
+ *  reading = null when the word is not kana (kanji etc.), which is then a rule violation ('not-kana'). */
+export function parseKanaAnswer(text) {
+  const raw = String(text ?? '').replace(/<\|[^|>]*\|>/g, '').trim();
+  const lines = raw.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  let w = (lines[0] || '').replace(/^[「『"'“\s]+|[」』"'”。、．.\s]+$/g, '');
+  let noisy = lines.length > 1;
+  const m = w.match(/^(.+?)\s*(?:[|｜:：]|[（(])/);
+  if (m) { w = m[1]; noisy = true; }
+  w = w.replace(/[「」『』\s]/g, '');
+  if ([...w].length > 12) noisy = true;
+  return { raw, word: w, reading: w && isKanaOnly(w) ? toHiragana(w) : null, noisy };
 }
 
 /** Parses the model's answer ("ことば|よみ", "ことば（よみ）", or a bare kana word) -> {word, reading|null}. */

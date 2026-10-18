@@ -1,6 +1,6 @@
-# DEVELOPER_NOTES — v0.9.0-build.001
+# DEVELOPER_NOTES — v0.10.0-build.001
 
-## build.2.0 (0.9.0-build.001): モデル切替
+## build.2.0 (0.10.0-build.001): モデル切替
 | key | repo | dtype | サイズ |
 |---|---|---|---|
 | lfm25-350m | LiquidAI/LFM2.5-350M-ONNX | q4 | 約290MB(推定) |

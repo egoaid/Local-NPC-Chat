@@ -48,3 +48,17 @@
 .gline .gname { font-size: .78rem; color: var(--muted); display: block; }
 .gline.system { background: transparent; border-style: dashed; color: var(--muted); text-align: center; }
 .gline.directive, .gline.player { background: var(--me); }
+
+.group-card label { display: block; margin: 6px 0; }
+.group-card label.toggle { display: flex; }
+.b-h { font-size: .95rem; margin: 12px 0 4px; }
+.table-wrap { overflow-x: auto; }
+.btable { border-collapse: collapse; font-size: .8rem; min-width: 100%; margin-bottom: 8px; }
+.btable th, .btable td { border: 1px solid var(--line); padding: 4px 6px; text-align: right; white-space: nowrap; }
+.btable th:first-child, .btable td:first-child { text-align: left; }
+.btable caption { text-align: left; font-weight: 700; padding: 4px 0; }
+.brun { border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; margin: 6px 0; }
+.brun summary { cursor: pointer; font-size: .85rem; min-height: 36px; display: flex; align-items: center; }
+.chip { display: inline-block; min-height: 32px; padding: 0 10px; margin: 2px; border-radius: 16px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .85rem; }
+.chip[aria-pressed="true"] { background: #f4cfc5; color: #5a1d0c; border-color: #d98b77; text-decoration: line-through; }
+.brun pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; margin: 6px 0; }

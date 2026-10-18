@@ -14,3 +14,4 @@
 - `characters.js` / `samples.js` / `migrate.js` — 住人のデータモデル、サンプル、旧版からの移行。`storage.js` — IndexedDB永続化＋同期キャッシュ。`backup.js` — バックアップ/住人ファイルの検証付き入出力。
 - `proactive.js` — 住人から話しかけるタイミングと話者選びのルール（純粋関数）。`world.js`は時間帯に加えて日付・季節・行事・日付質問の検出も担う。
 - `group.js` / `kana.js` — 住人同士の会話（物語・しりとり）の状態機械と、しりとりの規則。`Chat.generateExclusive()`で他の生成と排他。
+- `bench.js` — ベンチマークの指標計算・集計・CSV（純粋関数）。`GroupSession.attempts`の記録を解析する。
