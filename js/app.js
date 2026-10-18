@@ -1,5 +1,4 @@
 import { CONFIG, APP, MODELS, LENGTHS, LIGHT_CONTEXT, getModel, modelVersion, DEFAULT_MODEL_KEY } from './config.js';
-import { NPCS, getNpc } from './npcs.js';
 import * as LLM from './llm.js';
 import * as Store from './storage.js';
 import { Chat } from './chat.js';
@@ -7,48 +6,76 @@ import { Speech } from './speech.js';
 import { UpdateChecker } from './update-checker.js';
 import * as ui from './ui.js';
 import { resolveTime, PERIOD_KEYS } from './world.js';
-import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer, buildExport, parseImport } from './customize.js';
+import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer } from './customize.js';
+import { MAX_CHARACTERS, CLIMITS, SOFT_TOTAL_CHARS, blankCharacter, sanitizeCharacter, validateCharacter, newCharacterId, promptChars } from './characters.js';
+import { SAMPLES, characterFromSample } from './samples.js';
+import { migrateLegacy } from './migrate.js';
+import { buildBackup, buildCharacterFile, parseBackup, parseCharacterFile, FILE_LIMIT } from './backup.js';
 const { $ } = ui;
 
+// ---- storage (IndexedDB; falls back to localStorage) ----
+Store.onStorageError((e) => { console.warn('storage', e); ui.toast('データの保存でエラーが発生しました。保存領域がいっぱいか、ブラウザの設定で制限されている可能性があります。', 8000); });
+await Store.initStorage();
+
 const settings = Store.loadSettings();
-if (!NPCS.some((n) => n.id === settings.selectedNpc)) settings.selectedNpc = NPCS[0].id;
+let custom = sanitizeCustom(Store.loadCustom());
+let characters = Store.loadCharacters().map((c) => sanitizeCharacter(c)).filter((c) => c.id && c.name);
+{ // one-time migration from builds <= 0.6 (four fixed residents)
+  const meta = Store.loadMeta();
+  if (!meta.charactersMigrated) {
+    if (!characters.length) {
+      const r = migrateLegacy({ conversations: Store.loadConversations(), memory: Store.loadMemory(), relations: Store.loadRelations(), custom: Store.loadCustom() });
+      characters = r.characters; custom = sanitizeCustom(r.custom);
+    }
+    Store.saveCharacters(characters); Store.saveCustom(custom); Store.saveMeta({ ...meta, charactersMigrated: true });
+  }
+}
+const charById = (id) => characters.find((c) => c.id === id) || null;
+if (!charById(settings.selectedNpc)) settings.selectedNpc = characters[0]?.id ?? null;
 if (!MODELS.some((m) => m.key === settings.model)) settings.model = DEFAULT_MODEL_KEY;
 if (settings.timeMode !== 'auto' && !PERIOD_KEYS.includes(settings.timeMode)) settings.timeMode = 'auto';
 if (!LENGTH_KEYS.includes(settings.replyLength)) settings.replyLength = 'normal';
-const NPC_IDS = NPCS.map((n) => n.id);
-let custom = sanitizeCustom(Store.loadCustom(), NPC_IDS);
 const nowTime = () => resolveTime(settings.timeMode);
 const budget = () => { const c = settings.lightMode ? LIGHT_CONTEXT : (loadedDef || selectedDef()).context; return { budgetChars: c.historyChars, maxMessages: c.maxMessages }; };
-const getContext = (id) => ({ budget: budget(), memoryOn: settings.memoryOn, player: custom.player, world: custom.world, custom: custom.npcs[id] || '', time: nowTime(), length: LENGTHS[settings.replyLength] });
+const getContext = () => ({ budget: budget(), memoryOn: settings.memoryOn, player: custom.player, world: custom.world, time: nowTime(), length: LENGTHS[settings.replyLength] });
 const speech = new Speech();
 speech.on = settings.speechOn; speech.rate = settings.rate;
-let modelReady = false, firstTokenAt = 0, slowHintShown = false;
+let modelReady = false, firstTokenAt = 0, slowHintShown = false, lastStats = null;
+const runs = []; // diagnostics (newest last)
 LLM.setUseWorker(settings.useWorker);
 const save = () => Store.saveSettings(settings);
-const npcNow = () => getNpc(settings.selectedNpc);
+const npcNow = () => charById(settings.selectedNpc);
 
 const chat = new Chat({
-  getContext,
+  getContext, getCharacter: charById,
   onKnowsChange: (id) => { if (id === settings.selectedNpc) $('chk-knows').checked = chat.knows(id); },
   onSummarizing: (on) => { $('memory-status').textContent = on ? '記憶を整理中…' : ''; if (!on) syncMemoryUI(); refreshModelUI(); },
   onStream: (id, text) => { if (!firstTokenAt) firstTokenAt = Date.now(); if (id === settings.selectedNpc) ui.streamUpdate(text); },
+  onStats: (s) => { lastStats = s; },
   onDone: (id) => { ui.setGenerating(false); ui.setChatEnabled(modelReady); refreshModelUI(); if (id === settings.selectedNpc) render(); },
   onError: (e) => { console.error(e); ui.toast('返事の生成に失敗しました。もう一度試してください。'); showDetails(e); }
 });
 
-function render() { ui.renderMessages(settings.selectedNpc, chat.messages(settings.selectedNpc), { generating: chat.generating, onReplay: (t) => say(t, true) }); }
+function render() {
+  const npc = npcNow();
+  ui.showEmptyState(!npc);
+  if (npc) ui.renderMessages(npc, chat.messages(npc.id), { generating: chat.generating, onReplay: (t) => say(t, true) });
+}
 function showDetails(e) { $('err-details').hidden = false; $('err-pre').textContent = `${e?.name || 'Error'}: ${e?.message || e}\n${e?.stack || ''}`.slice(0, 2000); }
 
 function say(text, force = false) {
+  const npc = npcNow(); if (!npc) return;
   if (!force && !speech.on) return;
   if (!speech.supported) return ui.toast('このブラウザは音声合成に対応していません。');
-  const r = speech.speak(text, npcNow(), settings.voices[settings.selectedNpc]);
+  const r = speech.speak(text, npc, settings.voices[npc.id]);
   if (r.reason === 'no-voice') ui.toast('適切な声が見つかりませんでした。端末の標準音声で再生を試みます。');
 }
 
 function updateVoiceInfo() {
-  const npc = npcNow(); const prefs = settings.voices[npc.id];
+  const npc = npcNow();
+  if (!npc) { $('voice-info').textContent = ''; return; }
   if (!speech.supported) { $('voice-info').textContent = '音声合成は利用できません。'; return; }
+  const prefs = settings.voices[npc.id];
   const part = (lang, label) => {
     const p = speech.choose(lang, npc, prefs);
     return p ? `${label}: ${p.voice.name}（${p.onlineNatural ? 'Microsoft Online Natural' : '標準音声'}）` : `${label}: 利用可能な声なし`;
@@ -56,29 +83,47 @@ function updateVoiceInfo() {
   $('voice-info').textContent = `${npc.name}の声 → ${part('ja', '日本語')} / ${part('en', '英語')}`;
 }
 function refreshVoices() {
-  ui.fillVoiceSelects(speech.voices, settings.voices[settings.selectedNpc], (lang, val) => {
-    settings.voices[settings.selectedNpc] = { ...(settings.voices[settings.selectedNpc] || {}), [lang]: val }; save(); updateVoiceInfo();
+  const npc = npcNow();
+  ui.fillVoiceSelects(speech.voices, npc ? settings.voices[npc.id] : null, (lang, val) => {
+    if (!npcNow()) return;
+    const id = settings.selectedNpc;
+    settings.voices[id] = { ...(settings.voices[id] || {}), [lang]: val }; save(); updateVoiceInfo();
   });
   updateVoiceInfo();
 }
 
+function refreshNpcList() {
+  ui.renderNpcCards(characters, settings.selectedNpc, selectNpc, openEditor);
+  $('npc-count').textContent = `${characters.length} / ${MAX_CHARACTERS}人`;
+  const full = characters.length >= MAX_CHARACTERS;
+  $('btn-add-char').disabled = full; $('btn-add-sample').disabled = full; $('btn-import-char').disabled = full;
+}
+
 function selectNpc(id) {
   if (chat.generating) return;
-  speech.stop(); settings.selectedNpc = id; save();
-  const npc = npcNow(); ui.markSelected(id); ui.setChatHeader(npc);
-  chat.ensureGreeting(id, nowTime().key); render(); refreshVoices(); syncCustomUI();
+  speech.stop(); settings.selectedNpc = charById(id) ? id : null; save();
+  const npc = npcNow(); ui.markSelected(settings.selectedNpc); ui.setChatHeader(npc);
+  if (npc) chat.ensureGreeting(npc.id, nowTime().key);
+  render(); refreshVoices(); syncCustomUI();
 }
 
 async function send() {
   const input = $('input'); const text = input.value.trim();
-  if (!text) return;
+  if (!text || !npcNow()) return;
   if (!modelReady) return ui.toast('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
-  input.value = ''; speech.stop(); ui.setGenerating(true); firstTokenAt = 0; const t0 = Date.now();
+  input.value = ''; speech.stop(); ui.setGenerating(true); firstTokenAt = 0; lastStats = null; const t0 = Date.now();
   const id = settings.selectedNpc;
   const p = chat.send(id, text);
   render();
   const reply = await p;
-  if (firstTokenAt && firstTokenAt - t0 > 8000 && !settings.lightMode && !slowHintShown) { slowHintShown = true; ui.toast('返事が始まるまで時間がかかっています。重いときは、画面下のモデル設定で「軽量モード」をお試しください。', 8000); }
+  const total = Date.now() - t0, ttft = firstTokenAt ? firstTokenAt - t0 : null;
+  if (reply) {
+    const nt = lastStats?.newTokens ?? null;
+    runs.push({ ttft, total, promptTokens: lastStats?.promptTokens ?? null, newTokens: nt, tps: nt && ttft !== null && total > ttft ? nt / ((total - ttft) / 1000) : null });
+    if (runs.length > 10) runs.shift();
+    updateDiag();
+  }
+  if (ttft && ttft > 8000 && !settings.lightMode && !slowHintShown) { slowHintShown = true; ui.toast('返事が始まるまで時間がかかっています。重いときは、画面下のモデル設定で「軽量モード」をお試しください。', 8000); }
   ui.setGenerating(false); ui.setChatEnabled(modelReady); input.focus();
   if (reply && id === settings.selectedNpc) say(reply);
   if (reply && settings.memoryOn) chat.maybeSummarize(id); // background; yields to the next message
@@ -118,7 +163,7 @@ function updateBackendInfo() {
   $('backend-info').textContent = b.mode === 'worker' ? '推論: 別スレッド（Worker）で実行中' : b.mode === 'main' ? `推論: メインスレッドで実行中${b.fallbackReason ? `（別スレッドを使えなかったため: ${b.fallbackReason}）` : ''}` : '';
 }
 function markReady(def) {
-  updateBackendInfo();
+  updateBackendInfo(); updateDiag();
   ui.setBadge('badge-model', 'ready', `Local / Offline ✓ ${def.short} 準備完了`);
   ui.showModelPanel({ msg: `使用中: ${def.label}。推論はこの端末のGPUだけで行われ、会話は外部に送信されません。` });
   ui.setChatEnabled(true);
@@ -182,7 +227,7 @@ async function unloadNow(reason) {
   busy = false; await refreshModelUI();
 }
 
-function onModelSelect(key) { settings.model = key; save(); refreshModelUI(); }
+function onModelSelect(key) { settings.model = key; save(); refreshModelUI(); updateDiag(); }
 
 function gpuMessage(r) {
   if (r.reason === 'no-api') return 'このブラウザはWebGPUに対応していません。最新のChrome / Edge（デスクトップ・Android）や、WebGPUが有効なSafariをお試しください。';
@@ -190,7 +235,7 @@ function gpuMessage(r) {
   return 'WebGPUの初期化でエラーが発生しました。';
 }
 
-// ---- world time / customization ----
+// ---- world time / player settings ----
 function updateTimeBadge() {
   const t = nowTime();
   const hh = String(t.hour).padStart(2, '0'), mm = String(t.minute).padStart(2, '0');
@@ -199,34 +244,29 @@ function updateTimeBadge() {
 let saveTimer = null, statusTimer = null;
 function setStatus(msg) { const el = $('custom-status'); el.textContent = msg; clearTimeout(statusTimer); statusTimer = setTimeout(() => { el.textContent = ''; }, 6000); }
 function syncMemoryUI() {
-  $('memory-npc-name').textContent = npcNow().name;
-  $('txt-memory').value = chat.memoryOf(settings.selectedNpc);
+  const npc = npcNow();
+  $('memory-npc-name').textContent = npc ? npc.name : '（住人なし）';
+  $('txt-memory').value = npc ? chat.memoryOf(npc.id) : '';
 }
 function syncCustomUI() {
+  const npc = npcNow();
   syncMemoryUI(); $('chk-memory').checked = settings.memoryOn;
-  $('knows-npc-name').textContent = npcNow().name; $('chk-knows').checked = chat.knows(settings.selectedNpc);
+  $('knows-npc-name').textContent = npc ? npc.name : '（住人なし）'; $('chk-knows').checked = npc ? chat.knows(npc.id) : false; $('chk-knows').disabled = !npc;
+  $('btn-clear-memory').disabled = !npc;
   $('inp-player-name').value = custom.player.name;
   $('txt-player-profile').value = custom.player.profile; $('txt-player-personality').value = custom.player.personality;
   $('cnt-player-profile').textContent = custom.player.profile.length; $('cnt-player-personality').textContent = custom.player.personality.length;
-  const npc = npcNow();
-  $('custom-npc-name').textContent = npc.name;
-  $('txt-world').value = custom.world; $('txt-npc').value = custom.npcs[npc.id] || '';
-  $('cnt-world').textContent = $('txt-world').value.length; $('cnt-npc').textContent = $('txt-npc').value.length;
+  $('txt-world').value = custom.world; $('cnt-world').textContent = custom.world.length;
   $('sel-time').value = settings.timeMode; $('sel-length').value = settings.replyLength;
   updateTimeBadge();
 }
 function persistCustom() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => { Store.saveCustom(custom) ? setStatus('保存しました（この端末のブラウザ内）。') : ui.toast('設定を保存できませんでした（保存領域がいっぱいかもしれません）。'); }, 400);
+  saveTimer = setTimeout(() => { Store.saveCustom(custom); setStatus('保存しました（この端末のブラウザ内）。'); }, 400);
 }
 function wireCustom() {
-  $('txt-world').maxLength = LIMITS.world; $('txt-npc').maxLength = LIMITS.npc;
+  $('txt-world').maxLength = LIMITS.world;
   $('txt-world').addEventListener('input', (e) => { custom.world = e.target.value.slice(0, LIMITS.world); $('cnt-world').textContent = custom.world.length; persistCustom(); });
-  $('txt-npc').addEventListener('input', (e) => {
-    const v = e.target.value.slice(0, LIMITS.npc); $('cnt-npc').textContent = v.length;
-    if (v.trim()) custom.npcs[settings.selectedNpc] = v; else delete custom.npcs[settings.selectedNpc];
-    persistCustom();
-  });
   $('sel-time').addEventListener('change', (e) => { settings.timeMode = e.target.value; save(); updateTimeBadge(); });
   $('sel-length').addEventListener('change', (e) => { settings.replyLength = e.target.value; save(); });
   setInterval(updateTimeBadge, 30000);
@@ -235,35 +275,170 @@ function wireCustom() {
   $('inp-player-name').addEventListener('input', (e) => { player().name = e.target.value.replace(/[\r\n]+/g, ' ').slice(0, LIMITS.playerName); persistCustom(); });
   $('txt-player-profile').addEventListener('input', (e) => { player().profile = e.target.value.slice(0, LIMITS.playerProfile); $('cnt-player-profile').textContent = player().profile.length; persistCustom(); });
   $('txt-player-personality').addEventListener('input', (e) => { player().personality = e.target.value.slice(0, LIMITS.playerPersonality); $('cnt-player-personality').textContent = player().personality.length; persistCustom(); });
-  $('chk-knows').addEventListener('change', (e) => chat.setKnows(settings.selectedNpc, e.target.checked));
+  $('chk-knows').addEventListener('change', (e) => { if (npcNow()) chat.setKnows(settings.selectedNpc, e.target.checked); });
   $('chk-memory').addEventListener('change', (e) => { settings.memoryOn = e.target.checked; save(); });
-  $('btn-clear-memory').addEventListener('click', () => { chat.clearMemory(settings.selectedNpc); syncCustomUI(); setStatus('この住人の記憶を消しました（会話の履歴は残っています）。'); });
-  $('btn-export-settings').addEventListener('click', () => {
-    const data = buildExport({ custom, timeMode: settings.timeMode, replyLength: settings.replyLength, appVersion: APP.version });
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a'); const d = new Date();
-    a.href = URL.createObjectURL(blob);
-    a.download = `local-npc-chat-settings-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}.json`;
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
-    setStatus('設定を書き出しました（会話履歴とAIモデルは含まれません）。');
-  });
-  $('btn-import-settings').addEventListener('click', () => $('file-import').click());
-  $('file-import').addEventListener('change', async (e) => {
-    const f = e.target.files?.[0]; e.target.value = '';
-    if (!f) return;
-    if (f.size > LIMITS.fileBytes) return setStatus('ファイルが大きすぎます。');
-    const r = parseImport(await f.text(), NPC_IDS);
-    if (!r.ok) { setStatus(`読み込みに失敗しました：${r.error}`); return ui.toast(r.error); }
-    if (!confirm('現在の世界観・追加設定・時間・返答の長さを、ファイルの内容で上書きします。よろしいですか？')) return;
-    custom = { ...r.data.custom, player: r.data.player || custom.player }; settings.timeMode = r.data.timeMode; settings.replyLength = r.data.replyLength;
-    Store.saveCustom(custom); save(); syncCustomUI();
-    setStatus(`設定を読み込みました。${r.warnings.join(' ')}`);
-  });
+  $('btn-clear-memory').addEventListener('click', () => { if (!npcNow()) return; chat.clearMemory(settings.selectedNpc); syncCustomUI(); setStatus('この住人の記憶を消しました（会話の履歴は残っています）。'); });
   $('btn-reset-custom').addEventListener('click', () => {
-    if (!confirm('入力した世界観とすべての住人の追加設定を消します。よろしいですか？')) return;
-    custom = sanitizeCustom({}, NPC_IDS); Store.saveCustom(custom); syncCustomUI(); setStatus('入力した設定を消しました。');
+    if (!confirm('入力した世界観と、あなた（プレイヤー）の設定を消します。よろしいですか？')) return;
+    custom = sanitizeCustom({}); Store.saveCustom(custom); syncCustomUI(); setStatus('入力した設定を消しました。');
   });
 }
+
+// ---- characters: editor / samples / files ----
+let editingId = null;
+const FIELD = { name: 'f-name', age: 'f-age', gender: 'f-gender', occupation: 'f-occupation', firstPerson: 'f-first', personality: 'f-personality', speechStyle: 'f-speech', sampleLines: 'f-lines', interests: 'f-interests', notes: 'f-notes', greeting: 'f-greeting' };
+function downloadJson(obj, filename) {
+  const blob = new Blob([JSON.stringify(obj, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+const stamp = () => { const d = new Date(); return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`; };
+const safeName = (s) => String(s).replace(/[^\p{L}\p{N}_-]+/gu, '_').slice(0, 20) || 'character';
+
+function readEditor() {
+  const base = editingId ? charById(editingId) : blankCharacter();
+  const merged = { ...base };
+  for (const [k, id] of Object.entries(FIELD)) merged[k] = $(id).value;
+  merged.voice = { gender: $('f-vgender').value, pitch: Number($('f-pitch').value) };
+  if (merged.greeting) delete merged.greetings;                       // a custom greeting overrides the sample's per-period greetings
+  if (base.personality !== undefined && merged.personality !== base.personality) delete merged.summary; // card summary would be stale
+  return sanitizeCharacter(merged);
+}
+function updateTotal() {
+  const n = promptChars(readEditor());
+  $('f-total').textContent = `設定の合計: 約${n}字${n > SOFT_TOTAL_CHARS ? '（長いほど、返事の開始が遅くなります）' : ''}`;
+  $('out-pitch').textContent = Number($('f-pitch').value).toFixed(2);
+}
+function openEditor(id = null) {
+  if (chat.generating) return;
+  if (!id && characters.length >= MAX_CHARACTERS) return ui.toast(`住人は${MAX_CHARACTERS}人までです。`);
+  editingId = id;
+  const c = id ? charById(id) : blankCharacter();
+  if (!c) return;
+  for (const [k, fid] of Object.entries(FIELD)) $(fid).value = c[k] ?? '';
+  $('f-vgender').value = c.voice.gender; $('f-pitch').value = c.voice.pitch;
+  $('char-dlg-title').textContent = id ? `「${c.name}」を編集` : '住人を追加';
+  $('btn-char-delete').hidden = !id; $('btn-char-export').hidden = !id;
+  $('f-error').textContent = ''; updateTotal();
+  $('dlg-char').showModal();
+}
+function saveEditor() {
+  const c = readEditor();
+  const errs = validateCharacter(c);
+  if (errs.length) { $('f-error').textContent = errs.join(' '); return; }
+  const now = Date.now();
+  const dup = characters.some((o) => o.id !== editingId && o.name === c.name);
+  if (editingId) {
+    c.id = editingId; c.updatedAt = now;
+    characters = characters.map((o) => (o.id === editingId ? c : o));
+  } else {
+    c.id = newCharacterId(); c.createdAt = c.updatedAt = now; characters.push(c);
+  }
+  Store.saveCharacters(characters);
+  const wasNew = !editingId; editingId = null;
+  $('dlg-char').close();
+  refreshNpcList();
+  if (wasNew) { selectNpc(c.id); Store.requestPersistence().then(updateDataInfo); } else { ui.setChatHeader(npcNow()); render(); syncCustomUI(); refreshVoices(); }
+  ui.toast(dup ? '保存しました（同じ名前の住人がいます）。' : '保存しました。');
+}
+function deleteEditing() {
+  const c = charById(editingId); if (!c) return;
+  if (!confirm(`「${c.name}」を削除します。この住人との会話履歴と記憶も消えます。よろしいですか？`)) return;
+  chat.deleteData(c.id); delete settings.voices[c.id];
+  characters = characters.filter((o) => o.id !== c.id); Store.saveCharacters(characters);
+  editingId = null; $('dlg-char').close();
+  if (settings.selectedNpc === c.id) settings.selectedNpc = characters[0]?.id ?? null;
+  save(); refreshNpcList(); selectNpc(settings.selectedNpc); ui.toast('削除しました。');
+}
+function openSamples() {
+  const ul = $('sample-list'); ul.textContent = '';
+  for (const s of SAMPLES) {
+    const li = document.createElement('li'); const d = document.createElement('div');
+    d.innerHTML = '<div class="s-name"></div><div class="s-desc"></div>';
+    d.querySelector('.s-name').textContent = s.data.name; d.querySelector('.s-desc').textContent = `${s.data.age}歳・${s.data.occupation}　${s.data.summary}`;
+    const b = document.createElement('button'); b.type = 'button';
+    const exists = characters.some((c) => c.sampleKey === s.key);
+    b.textContent = exists ? '追加済み' : '追加'; b.disabled = exists || characters.length >= MAX_CHARACTERS;
+    b.addEventListener('click', () => {
+      const c = characterFromSample(s, newCharacterId()); characters.push(c); Store.saveCharacters(characters);
+      refreshNpcList(); selectNpc(c.id); $('dlg-samples').close(); ui.toast(`「${c.name}」を追加しました。名前や設定は「編集」から変えられます。`); Store.requestPersistence().then(updateDataInfo);
+    });
+    li.append(d, b); ul.appendChild(li);
+  }
+  $('dlg-samples').showModal();
+}
+async function importCharacterFile(file) {
+  if (!file) return;
+  if (characters.length >= MAX_CHARACTERS) return ui.toast(`住人は${MAX_CHARACTERS}人までです。`);
+  if (file.size > FILE_LIMIT) return ui.toast('ファイルが大きすぎます。');
+  const r = parseCharacterFile(await file.text());
+  if (!r.ok) return ui.toast(r.error, 6000);
+  const c = r.character; c.id = newCharacterId(); c.createdAt = c.updatedAt = Date.now();
+  characters.push(c); Store.saveCharacters(characters); refreshNpcList(); selectNpc(c.id); ui.toast(`「${c.name}」を読み込みました。`);
+}
+function wireCharacters() {
+  $('btn-add-char').addEventListener('click', () => openEditor(null));
+  $('btn-add-sample').addEventListener('click', openSamples);
+  $('btn-import-char').addEventListener('click', () => $('file-import-char').click());
+  $('file-import-char').addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; importCharacterFile(f); });
+  $('btn-char-save').addEventListener('click', saveEditor);
+  $('btn-char-cancel').addEventListener('click', () => { editingId = null; $('dlg-char').close(); });
+  $('btn-char-delete').addEventListener('click', deleteEditing);
+  $('btn-char-export').addEventListener('click', () => { const c = charById(editingId); if (c) downloadJson(buildCharacterFile(c, { appVersion: APP.version }), `npc-${safeName(c.name)}-${stamp()}.json`); });
+  const dlg = $('dlg-char');
+  dlg.addEventListener('input', updateTotal);
+  dlg.addEventListener('cancel', () => { editingId = null; });
+  $('f-name').maxLength = CLIMITS.name;
+}
+
+// ---- backup / data ----
+async function updateDataInfo() {
+  const s = await Store.storageStatus();
+  const mb = (n) => (n === null ? '—' : `${(n / 1048576).toFixed(1)}MB`);
+  const where = { indexedDB: 'IndexedDB', localStorage: 'localStorage（IndexedDBが使えないため）', memory: 'メモリのみ（保存されません）' }[s.backend];
+  $('data-info').textContent = `保存先: ${where} / 永続化: ${s.persisted === null ? '不明' : s.persisted ? '有効（ブラウザに消されにくい）' : '未設定'} / 使用量: ${mb(s.usage)}（上限の目安 ${mb(s.quota)}）`;
+  $('btn-persist').hidden = s.persisted === true;
+}
+function exportBackup(withChats) {
+  downloadJson(buildBackup({ characters, custom, settings, conversations: chat.convs, memory: chat.mem, relations: chat.rel }, { withChats, appVersion: APP.version }), `local-npc-chat-backup-${stamp()}.json`);
+  setStatus(withChats ? 'バックアップを書き出しました（会話履歴と記憶を含みます）。' : 'バックアップを書き出しました（会話履歴は含みません）。');
+}
+async function importBackup(file) {
+  if (!file) return;
+  if (file.size > FILE_LIMIT) return ui.toast('ファイルが大きすぎます。');
+  const r = parseBackup(await file.text());
+  if (!r.ok) { setStatus(`読み込みに失敗しました：${r.error}`); return ui.toast(r.error, 6000); }
+  const d = r.data;
+  const lines = [];
+  if (d.characters) lines.push(`住人 ${d.characters.length}人（現在の住人は置き換えられます）`);
+  lines.push('世界観・あなたの設定・時間/返答の長さ/記憶の設定');
+  if (d.conversations) lines.push('会話履歴と記憶（現在のものは置き換えられます）');
+  if (!confirm(`次の内容で現在のデータを上書きします。よろしいですか？\n・${lines.join('\n・')}${r.warnings.length ? `\n\n注意:\n${r.warnings.join('\n')}` : ''}`)) return;
+  if (d.characters) {
+    const keep = new Set(d.characters.map((c) => c.id));
+    for (const c of characters) if (!keep.has(c.id)) chat.deleteData(c.id);
+    characters = d.characters; Store.saveCharacters(characters);
+  }
+  custom = { ...custom, ...d.custom }; Store.saveCustom(custom);
+  Object.assign(settings, d.settings || {}); save();
+  if (d.conversations) chat.replaceState({ conversations: d.conversations, memory: d.memory, relations: d.relations });
+  if (!charById(settings.selectedNpc)) settings.selectedNpc = characters[0]?.id ?? null;
+  refreshNpcList(); selectNpc(settings.selectedNpc);
+  setStatus(`バックアップを読み込みました。${r.warnings.join(' ')}`);
+}
+
+// ---- diagnostics ----
+function diagInfo() {
+  const b = LLM.backendInfo(); const bud = budget();
+  return {
+    アプリ: `v${APP.version}`, モデル: loadedDef ? `${loadedDef.id} (${loadedDef.dtype})` : `（未読み込み／選択中: ${selectedDef().short}）`,
+    推論スレッド: b.mode === 'worker' ? '別スレッド(Worker)' : b.mode === 'main' ? `メインスレッド${b.fallbackReason ? `（${b.fallbackReason}）` : ''}` : '未起動',
+    WebGPU: gpuInfo.ok ? `利用可能${gpuInfo.info ? ` (${gpuInfo.info})` : ''}${gpuInfo.f16 ? ' / shader-f16' : ''}` : '利用不可',
+    '履歴の予算': `${bud.budgetChars}字・${bud.maxMessages}発言${settings.lightMode ? '（軽量モード）' : ''}`,
+    保存先: Store.storageBackend(), 住人数: characters.length
+  };
+}
+function updateDiag() { ui.renderDiagnostics(diagInfo(), runs); }
 
 function wire() {
   $('btn-send').addEventListener('click', send);
@@ -273,11 +448,11 @@ function wire() {
     if (matchMedia('(pointer: coarse)').matches) return; // touch keyboards: Enter = newline
     e.preventDefault(); send();
   });
-  $('btn-new').addEventListener('click', () => { speech.stop(); chat.newConversation(settings.selectedNpc, nowTime().key); render(); syncCustomUI(); });
-  $('btn-clear').addEventListener('click', () => { speech.stop(); chat.clear(settings.selectedNpc); render(); syncCustomUI(); });
+  $('btn-new').addEventListener('click', () => { const n = npcNow(); if (!n) return; speech.stop(); chat.newConversation(n.id, nowTime().key); render(); syncCustomUI(); });
+  $('btn-clear').addEventListener('click', () => { const n = npcNow(); if (!n) return; speech.stop(); chat.clear(n.id); render(); syncCustomUI(); });
   $('chk-worker').checked = settings.useWorker; $('chk-light').checked = settings.lightMode;
   $('chk-worker').addEventListener('change', (e) => { settings.useWorker = e.target.checked; save(); LLM.setUseWorker(settings.useWorker); ui.toast(loadedDef ? '次にモデルを読み込むときから反映されます（「GPUメモリを解放」→「読み込む」）。' : '設定しました。'); });
-  $('chk-light').addEventListener('change', (e) => { settings.lightMode = e.target.checked; save(); ui.toast(settings.lightMode ? '軽量モードをオンにしました（次の返事から）。' : '軽量モードをオフにしました。'); });
+  $('chk-light').addEventListener('change', (e) => { settings.lightMode = e.target.checked; save(); updateDiag(); ui.toast(settings.lightMode ? '軽量モードをオンにしました（次の返事から）。' : '軽量モードをオフにしました。'); });
   $('btn-load').addEventListener('click', () => switchTo(selectedDef()));
   $('btn-unload').addEventListener('click', () => unloadNow('manual'));
   $('btn-delete-model').addEventListener('click', async () => {
@@ -302,14 +477,20 @@ function wire() {
   const about = () => { ui.fillAbout(loadedDef || selectedDef(), { '推論スレッド': LLM.backendInfo().mode === 'worker' ? '別スレッド(Worker)' : LLM.backendInfo().mode === 'main' ? 'メインスレッド' : '未起動', 'モデル状態': modelReady ? `Local / Offline（${loadedDef.short} 準備完了）` : '未読み込み', 'WebGPU': gpuInfo.ok ? `利用可能${gpuInfo.f16 ? '（shader-f16対応）' : '（shader-f16非対応）'}` : '利用不可', '公式URL': CONFIG.publicUrl }); $('dlg-about').showModal(); };
   $('btn-about').addEventListener('click', about); $('btn-about2').addEventListener('click', about);
   $('btn-clear-data').addEventListener('click', () => {
-    if (!confirm('すべての住人との会話履歴を削除します。設定とAIモデルは残ります。よろしいですか？')) return;
-    chat.clearAll(); chat.ensureGreeting(settings.selectedNpc, nowTime().key); render(); syncCustomUI(); ui.toast('会話データを削除しました。');
+    if (!confirm('すべての住人との会話履歴と記憶を削除します。住人・設定・AIモデルは残ります。よろしいですか？')) return;
+    chat.clearAll(); const n = npcNow(); if (n) chat.ensureGreeting(n.id, nowTime().key); render(); syncCustomUI(); ui.toast('会話データを削除しました。');
   });
   $('btn-reset').addEventListener('click', () => $('dlg-reset').showModal());
   $('btn-reset-ok').addEventListener('click', async () => {
     await Store.resetAppData({ includeModel: $('chk-reset-model').checked });
     location.reload();
   });
+  $('btn-export-backup').addEventListener('click', () => exportBackup(false));
+  $('btn-export-backup-chats').addEventListener('click', () => exportBackup(true));
+  $('btn-import-backup').addEventListener('click', () => $('file-import').click());
+  $('file-import').addEventListener('change', (e) => { const f = e.target.files?.[0]; e.target.value = ''; importBackup(f); });
+  $('btn-persist').addEventListener('click', async () => { const ok = await Store.requestPersistence(); ui.toast(ok ? '保存領域を消えにくくしました。' : 'ブラウザが許可しませんでした（利用状況によって許可される場合があります）。', 6000); updateDataInfo(); });
+  $('btn-copy-diag').addEventListener('click', async () => { try { await navigator.clipboard.writeText($('diag-pre').textContent); ui.toast('診断をコピーしました。'); } catch { ui.toast('コピーできませんでした。手動で選択してコピーしてください。'); } });
   $('btn-update-later').addEventListener('click', ui.hideUpdate);
 }
 
@@ -324,11 +505,12 @@ async function registerSW(checker) {
 async function init() {
   $('ver').textContent = APP.version;
   document.title = `${APP.appName} v${APP.version}`;
-  ui.renderNpcCards(settings.selectedNpc, selectNpc);
-  wire(); wireCustom(); ui.setGenerating(false); ui.setChatEnabled(false);
+  wire(); wireCustom(); wireCharacters(); ui.setGenerating(false); ui.setChatEnabled(false);
+  refreshNpcList();
   speech.onVoices = refreshVoices;
   selectNpc(settings.selectedNpc);
   speech.init().then(refreshVoices);
+  updateDataInfo(); updateDiag();
   if (!speech.supported) ui.toast('このブラウザは音声合成に対応していません（会話は可能です）。', 6000);
 
   const checker = new UpdateChecker({
@@ -339,7 +521,7 @@ async function init() {
   registerSW(checker); checker.start();
 
   ui.renderModelSelect(settings.model, onModelSelect);
-  const gpu = await LLM.checkWebGPU(); gpuInfo = gpu;
+  const gpu = await LLM.checkWebGPU(); gpuInfo = gpu; updateDiag();
   ui.setBadge('badge-gpu', gpu.ok ? 'ready' : 'error', gpu.ok ? `WebGPU: 利用可能${gpu.info ? ` (${gpu.info})` : ''}` : 'WebGPU: 利用不可');
   if (!gpu.ok) {
     ui.setBadge('badge-model', 'error', 'モデル: 実行不可');

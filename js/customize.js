@@ -9,7 +9,7 @@ export const LENGTH_KEYS = Object.freeze(['short', 'normal', 'long']);
 const clean = (s, max) => String(s ?? '').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, '').trim().slice(0, max);
 
 export const emptyPlayer = () => ({ name: '', profile: '', personality: '' });
-export const emptyCustom = () => ({ world: '', npcs: {}, player: emptyPlayer() });
+export const emptyCustom = () => ({ world: '', player: emptyPlayer() });
 
 export function sanitizePlayer(p) {
   return {
@@ -19,22 +19,11 @@ export function sanitizePlayer(p) {
   };
 }
 
-export function sanitizeCustom(c, npcIds) {
-  const out = emptyCustom();
-  out.world = clean(c?.world, LIMITS.world);
-  for (const id of npcIds) { const t = clean(c?.npcs?.[id], LIMITS.npc); if (t) out.npcs[id] = t; }
-  out.player = sanitizePlayer(c?.player);
-  return out;
+export function sanitizeCustom(c) {
+  return { world: clean(c?.world, LIMITS.world), player: sanitizePlayer(c?.player) };
 }
 
-export function buildExport({ custom, timeMode, replyLength, appVersion, now = new Date() }) {
-  return {
-    schema: SCHEMA, schemaVersion: SCHEMA_VERSION, appVersion, exportedAt: now.toISOString(),
-    world: custom.world || '', npcs: { ...custom.npcs }, player: { ...emptyPlayer(), ...custom.player }, timeMode, replyLength
-  };
-}
-
-/** Validates imported JSON text. Returns {ok:true,data,warnings} or {ok:false,error}. Never throws. */
+/** Validates a LEGACY settings file (schema local-npc-chat-rpg/settings v1). npcIds=null ignores the old per-NPC notes. */
 export function parseImport(text, npcIds) {
   if (typeof text !== 'string' || text.length > LIMITS.fileBytes) return { ok: false, error: 'ファイルが大きすぎるか、読み込めません。' };
   let j;
@@ -46,7 +35,7 @@ export function parseImport(text, npcIds) {
   if (world.length > LIMITS.world) warnings.push(`世界観が${LIMITS.world}文字を超えていたため切り詰めました。`);
   const npcsIn = j.npcs && typeof j.npcs === 'object' && !Array.isArray(j.npcs) ? j.npcs : {};
   const npcs = {};
-  for (const [id, v] of Object.entries(npcsIn)) {
+  for (const [id, v] of (npcIds ? Object.entries(npcsIn) : [])) {
     if (!npcIds.includes(id)) { warnings.push(`未知の住人「${String(id).slice(0, 30)}」の設定は無視しました。`); continue; }
     const t = clean(v, LIMITS.npc + 1);
     if (t.length > LIMITS.npc) warnings.push(`「${id}」の設定が${LIMITS.npc}文字を超えていたため切り詰めました。`);

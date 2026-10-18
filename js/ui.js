@@ -1,4 +1,4 @@
-import { NPCS, getNpc } from './npcs.js';
+import { cardLine, cardSummary } from './characters.js';
 import { MODELS, APP } from './config.js';
 
 export const $ = (id) => document.getElementById(id);
@@ -11,24 +11,30 @@ export function toast(msg, ms = 4000) {
 
 export function setBadge(id, cls, text) { const b = $(id); b.className = `badge badge-${cls}`; b.textContent = text; }
 
-export function renderNpcCards(selectedId, onSelect) {
+export function renderNpcCards(list, selectedId, onSelect, onEdit) {
   const box = $('npc-cards'); box.textContent = '';
-  for (const n of NPCS) {
+  for (const n of list) {
+    const wrap = document.createElement('div'); wrap.className = 'npc-item';
     const b = document.createElement('button');
     b.type = 'button'; b.className = 'npc-card'; b.dataset.id = n.id;
     b.setAttribute('aria-pressed', String(n.id === selectedId));
     b.innerHTML = '<span class="n"></span><span class="o"></span><span class="d"></span>';
     b.querySelector('.n').textContent = n.name;
-    b.querySelector('.o').textContent = `${n.age}歳・${n.occupation}`;
-    b.querySelector('.d').textContent = n.summary;
+    b.querySelector('.o').textContent = cardLine(n);
+    b.querySelector('.d').textContent = cardSummary(n);
     b.addEventListener('click', () => onSelect(n.id));
-    box.appendChild(b);
+    const e = document.createElement('button');
+    e.type = 'button'; e.className = 'secondary npc-edit'; e.textContent = '編集'; e.dataset.id = n.id;
+    e.setAttribute('aria-label', `${n.name}を編集`); e.addEventListener('click', () => onEdit(n.id));
+    wrap.append(b, e); box.appendChild(wrap);
   }
 }
 export function markSelected(id) { document.querySelectorAll('.npc-card').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.id === id))); }
-export function lockNpcCards(lock) { document.querySelectorAll('.npc-card').forEach((b) => { b.disabled = lock; }); }
+export function lockNpcCards(lock) { document.querySelectorAll('.npc-card, .npc-edit').forEach((b) => { b.disabled = lock; }); }
 
-export function setChatHeader(npc) { $('chat-npc-name').textContent = npc.name; $('chat-npc-meta').textContent = `${npc.age}歳・${npc.occupation}`; }
+export function setChatHeader(npc) { $('chat-npc-name').textContent = npc ? npc.name : ''; $('chat-npc-meta').textContent = npc ? cardLine(npc) : ''; }
+/** Empty state: no characters yet -> hide the chat, show guidance. */
+export function showEmptyState(empty) { $('empty-state').hidden = !empty; $('chat-body').hidden = empty; }
 
 function bubble(msg, npc, { typing = false, onReplay } = {}) {
   const el = document.createElement('div');
@@ -43,8 +49,8 @@ function bubble(msg, npc, { typing = false, onReplay } = {}) {
   }
   return el;
 }
-export function renderMessages(npcId, list, { generating = false, onReplay } = {}) {
-  const npc = getNpc(npcId); const box = $('messages'); box.textContent = '';
+export function renderMessages(npc, list, { generating = false, onReplay } = {}) {
+  const box = $('messages'); box.textContent = '';
   list.forEach((m, i) => box.appendChild(bubble(m, npc, { typing: generating && i === list.length - 1 && m.role === 'assistant', onReplay })));
   box.scrollTop = box.scrollHeight;
 }
@@ -59,6 +65,20 @@ export function setGenerating(on) {
   ['sel-model', 'btn-load', 'btn-unload', 'btn-delete-model'].forEach((id) => { $(id).disabled = on || $(id).disabled; });
 }
 export function setChatEnabled(ok) { $('btn-send').disabled = !ok; $('model-hint').hidden = ok; }
+
+/** Diagnostics panel. runs: [{ttft,total,promptTokens,newTokens,tps,chars}] (newest last) */
+export function renderDiagnostics(info, runs) {
+  const lines = [];
+  const fmt = (v, d = 1) => (v === null || v === undefined || Number.isNaN(v) ? '—' : Number(v).toFixed(d));
+  for (const [k, v] of Object.entries(info)) lines.push(`${k}: ${v}`);
+  const last = runs[runs.length - 1];
+  if (last) {
+    lines.push('', `直近の返事: 開始まで ${fmt(last.ttft / 1000)}秒 / 全体 ${fmt(last.total / 1000)}秒 / 入力 ${last.promptTokens ?? '—'}トークン / 出力 ${last.newTokens ?? '—'}トークン / ${fmt(last.tps)} トークン/秒`);
+    const avg = (f) => { const v = runs.map(f).filter((x) => Number.isFinite(x)); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+    lines.push(`平均（直近${runs.length}回）: 開始まで ${fmt(avg((r) => r.ttft) / 1000)}秒 / ${fmt(avg((r) => r.tps))} トークン/秒`);
+  } else lines.push('', 'まだ返事を生成していません。');
+  $('diag-pre').textContent = lines.join('\n');
+}
 
 export function showModelPanel({ msg, pct = null, error = null }) {
   $('model-msg').textContent = msg || '';

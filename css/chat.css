@@ -28,3 +28,13 @@
 .player-box legend { font-weight: 700; padding: 0 6px; }
 .player-box input[type=text] { width: 100%; min-height: 44px; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }
 .player-box textarea { width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); resize: vertical; }
+
+.chat-body { display: flex; flex-direction: column; gap: 8px; }
+.empty-state { text-align: center; padding: 24px 8px; }
+.char-form label { display: block; margin-top: 8px; font-size: .9rem; }
+.char-form input[type=text], .char-form select, .char-form textarea { width: 100%; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; min-height: 44px; }
+.char-form textarea { min-height: 0; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.form-error { color: var(--danger); min-height: 1.2em; font-size: .88rem; }
+#dlg-char { width: min(94vw, 520px); max-height: 92dvh; overflow-y: auto; }
+#diag-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; background: var(--bg); padding: 8px; border-radius: 8px; }

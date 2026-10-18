@@ -65,7 +65,7 @@ export function createEngine() {
       });
       const g = current.gen;
       const limit = maxNewTokens || g.maxNewTokens;
-      let truncated = null;
+      let truncated = null, promptTokens = null, newTokens = null;
       try {
         const out = await model.generate({
           ...inputs, max_new_tokens: limit, do_sample: true, temperature: temperature ?? g.temperature,
@@ -74,10 +74,11 @@ export function createEngine() {
         try {
           const total = out?.dims?.[1] ?? out?.sequences?.dims?.[1] ?? out?.[0]?.dims?.[1];
           const plen = inputs.input_ids.dims[1];
-          if (typeof total === 'number') truncated = total - plen >= limit;
+          promptTokens = plen;
+          if (typeof total === 'number') { newTokens = total - plen; truncated = newTokens >= limit; }
         } catch { /* unknown */ }
       } finally { stopper = null; }
-      return { text, truncated };
+      return { text, truncated, promptTokens, newTokens };
     },
 
     stop() { stopper?.interrupt(); }

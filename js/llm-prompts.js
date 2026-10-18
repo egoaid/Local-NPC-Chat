@@ -1,37 +1,40 @@
 import { CONFIG, LENGTHS } from './config.js';
-import { TOWN } from './npcs.js';
+import { TOWN } from './samples.js';
+import { GENDER_LABEL } from './characters.js';
 import { LIMITS } from './customize.js';
 import { selectRecent } from './memory.js';
 
 const list = (a) => a.map((x) => `- ${x}`).join('\n');
 
-/** ctx: { world?: string, custom?: string, memory?: string,
- *  playerView?: undefined (no info) | null (stranger: NPC knows nothing) | {name, profile, personality, mayCallName} (acquainted), time?: {label, guide, auto, hour}, length?: {sentences, chars} } */
+/** ctx: { world?, memory?, playerView?, time?, length? }
+ *  playerView: undefined (no info) | null (stranger: NPC knows nothing) | {name, profile, personality, mayCallName} (acquainted)
+ *  npc: a character object (see characters.js). */
 export function buildSystemPrompt(npc, ctx = {}) {
-  const g = npc.gender === 'male' ? '男性' : '女性';
   const len = ctx.length || LENGTHS.normal;
   const world = String(ctx.world || '').trim().slice(0, LIMITS.world);
-  const custom = String(ctx.custom || '').trim().slice(0, LIMITS.npc);
   const memory = String(ctx.memory || '').trim().slice(0, CONFIG.memory.maxChars);
   const t = ctx.time;
-  const parts = [
-    `あなたは「${TOWN.name}」に住む「${npc.name}」というキャラクターです。${npc.name}本人としてプレイヤーと会話します。`,
-    `【プロフィール】${npc.age}歳 / ${g} / ${npc.occupation} / 一人称は「${npc.firstPerson}」`,
-    `【性格】\n${list(npc.personality)}`,
-    `【話し方】${npc.speechStyle}`,
-    `【興味】${npc.interests.join('、')}`,
-    `【知っていること】\n${list([...npc.knowledge, ...TOWN.facts])}`,
-    `【知らないこと・苦手なこと】\n${list(npc.limitations)}`
-  ];
+  const parts = [world
+    ? `あなたは「${npc.name}」というキャラクターです。${npc.name}本人としてプレイヤーと会話します。`
+    : `あなたは「${TOWN.name}」に住む「${npc.name}」というキャラクターです。${npc.name}本人としてプレイヤーと会話します。`];
+  const prof = [npc.age ? `${npc.age}歳` : '', npc.gender === 'other' ? '' : GENDER_LABEL[npc.gender] || '', npc.occupation,
+    npc.firstPerson ? `一人称は「${npc.firstPerson}」` : ''].filter(Boolean).join(' / ');
+  if (prof) parts.push(`【プロフィール】${prof}`);
+  if (npc.personality) parts.push(`【性格】${npc.personality}`);
+  if (npc.speechStyle) parts.push(`【話し方】${npc.speechStyle}`);
+  const lines = String(npc.sampleLines || '').split('\n').map((l) => l.trim()).filter(Boolean);
+  if (lines.length) parts.push(`【セリフ例（口調の見本。そのまま繰り返さず、同じ雰囲気で話す）】\n${list(lines)}`);
+  if (npc.interests) parts.push(`【興味】${npc.interests}`);
+  if (npc.notes) parts.push(`【${npc.name}の追加設定（プレイヤーが決めた事実）】\n${npc.notes}`);
   if (world) parts.push(`【この世界の設定（プレイヤーが決めた事実）】\n${world}`);
-  if (custom) parts.push(`【${npc.name}の追加設定（プレイヤーが決めた事実）】\n${custom}`);
+  else parts.push(`【町について】\n${list(TOWN.facts)}`);
   const pv = ctx.playerView;
   if (pv) {
-    const lines = [];
-    if (pv.name) lines.push(`名前: ${pv.name}`);
-    if (pv.profile) lines.push(`プロフィール: ${pv.profile}`);
-    if (pv.personality) lines.push(`性格: ${pv.personality}`);
-    if (lines.length) parts.push(`【話し相手（プレイヤー）について】\n${list(lines)}`);
+    const ls = [];
+    if (pv.name) ls.push(`名前: ${pv.name}`);
+    if (pv.profile) ls.push(`プロフィール: ${pv.profile}`);
+    if (pv.personality) ls.push(`性格: ${pv.personality}`);
+    if (ls.length) parts.push(`【話し相手（プレイヤー）について】\n${list(ls)}`);
   }
   if (memory) parts.push(`【これまでの会話の記憶（要約）】\n${memory}`);
   if (t) parts.push(`【現在の時間帯】${t.label}${t.auto && t.hour !== null ? `（${t.hour}時ごろ）` : ''}。${t.guide}`);
@@ -39,7 +42,7 @@ export function buildSystemPrompt(npc, ctx = {}) {
     `必ず${npc.name}として、自然に答える。返答は${len.sentences}、${len.chars}字以内を目安にし、文を最後まで言い切る。`,
     '自分がAI・言語モデル・チャットボット・プログラムだとは言わない。'
   ];
-  if (world || custom) rules.push('プレイヤーが決めた設定は事実として扱い、会話に自然に反映する。基本の設定と食い違う場合は、プレイヤーの設定を優先する。');
+  if (npc.notes || world) rules.push('プレイヤーが決めた設定は事実として扱い、会話に自然に反映する。基本の設定と食い違う場合は、プレイヤーの設定を優先する。');
   if (pv === null) rules.push('相手の名前や素性はまだ知らない。名前で呼ばず、相手について勝手に決めつけない。');
   if (pv) {
     if (pv.profile || pv.personality) rules.push('話し相手のプロフィールや性格は、すでに知っていることとして自然に会話へ反映する。毎回は触れない。');
@@ -48,7 +51,7 @@ export function buildSystemPrompt(npc, ctx = {}) {
       : '今回の返事では相手の名前を呼ばない。');
   }
   if (memory) rules.push('記憶の内容は覚えているものとして自然に話す。記憶にないことは覚えていないと答えてよい。');
-  rules.push('上に書かれていない町の事実や自分の経歴を勝手に作らない。知らないことは知らないと答える。');
+  rules.push('上に書かれていない事実（町・他の人・自分の経歴）を勝手に作らない。知らないことは知らないと答える。');
   if (t) rules.push('時間帯に合った挨拶・話題・雰囲気で話す。ただし毎回時間の話をしない。');
   rules.push('毎回職業の話をしない。同じ決まり文句を繰り返さない。長々と説明しない。', 'プレイヤーが日本語なら日本語で、英語なら英語で答える。');
   parts.push('【ルール】', list(rules));

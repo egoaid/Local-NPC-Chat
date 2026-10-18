@@ -1,5 +1,5 @@
 import { CONFIG } from './config.js';
-import { getNpc, greetingFor } from './npcs.js';
+import { greetingFor } from './characters.js';
 import { buildMessages, buildSummaryMessages, cleanReply, cleanSummary, finishCutoff } from './llm-prompts.js';
 import * as LLMReal from './llm.js';
 import * as Store from './storage.js';
@@ -7,7 +7,7 @@ import { selectRecent, pendingToFold } from './memory.js';
 import { mentionsName, nameCooldownOk } from './player.js';
 
 export class Chat {
-  /** handlers: onStream(npcId,text) onDone(npcId) onError(err) onSummarizing(bool) getContext(npcId); llm (optional, for tests) */
+  /** handlers: getCharacter(id) onStream(npcId,text) onDone(npcId) onError(err) onSummarizing(bool) onKnowsChange(id) onStats(stats) getContext(npcId); llm (optional, for tests) */
   constructor(handlers = {}) {
     this.h = handlers;
     this.llm = handlers.llm || LLMReal;
@@ -29,20 +29,25 @@ export class Chat {
   saveMem() { Store.saveMemory(this.mem); }
 
   ensureGreeting(npcId, periodKey = 'day') {
+    const npc = this.h.getCharacter?.(npcId); if (!npc) return;
     const list = this.messages(npcId);
-    if (!list.length) { list.push({ id: this.newId(), role: 'assistant', content: greetingFor(getNpc(npcId), periodKey), greeting: true }); this.save(); }
+    if (!list.length) { list.push({ id: this.newId(), role: 'assistant', content: greetingFor(npc, periodKey), greeting: true }); this.save(); }
   }
   abortSummary() { if (this.summarizing) { this.summaryAborted = true; this.llm.stop(); } }
   clearMemory(npcId) { this.abortSummary(); delete this.mem[npcId]; this.saveMem(); this.setKnows(npcId, false); }
   clear(npcId) { this.abortSummary(); this.convs[npcId] = []; delete this.mem[npcId]; this.save(); this.saveMem(); this.setKnows(npcId, false); }
   newConversation(npcId, periodKey) { this.clear(npcId); this.ensureGreeting(npcId, periodKey); }
+  /** Removes every trace of a deleted character. */
+  deleteData(npcId) { this.abortSummary(); delete this.convs[npcId]; delete this.mem[npcId]; delete this.rel[npcId]; this.save(); this.saveMem(); Store.saveRelations(this.rel); }
+  /** Replaces all state (backup restore). */
+  replaceState({ conversations, memory, relations }) { this.abortSummary(); if (conversations) this.convs = conversations; if (memory) this.mem = memory; if (relations) this.rel = relations; for (const l of Object.values(this.convs)) for (const m of l) if (!m.id) m.id = this.newId(); this.save(); this.saveMem(); Store.saveRelations(this.rel); }
   clearAll() { this.abortSummary(); this.convs = {}; this.mem = {}; this.rel = {}; Store.clearConversationData(); this.saveMem(); Store.saveRelations(this.rel); }
 
   async send(npcId, rawText) {
     const text = rawText.trim().slice(0, CONFIG.context.maxInputChars);
     if (!text || this.generating) return null;
     if (this.summarizing) { this.abortSummary(); await this.summaryPromise; } // user comes first
-    const npc = getNpc(npcId);
+    const npc = this.h.getCharacter?.(npcId); if (!npc) return null;
     const list = this.messages(npcId);
     const userMsg = { id: this.newId(), role: 'user', content: text };
     const history = [...list, userMsg];
@@ -60,10 +65,11 @@ export class Chat {
       const known = this.knows(npcId) && !!(name || pl.profile || pl.personality);
       const recentNpc = list.filter((m) => m.role === 'assistant' && !m.greeting && m.content).slice(-2).map((m) => m.content);
       ctx.playerView = known ? { name, profile: pl.profile || '', personality: pl.personality || '', mayCallName: !!name && nameCooldownOk(recentNpc, name) } : null;
-      const { text: raw, truncated } = await this.llm.generate(buildMessages(npc, history, ctx), (t) => {
+      const { text: raw, truncated, promptTokens, newTokens } = await this.llm.generate(buildMessages(npc, history, ctx), (t) => {
         reply.content = cleanReply(t, npc);
         this.h.onStream?.(npcId, reply.content);
       }, { maxNewTokens: ctx.length?.maxNewTokens });
+      this.h.onStats?.({ promptTokens, newTokens, truncated });
       reply.content = cleanReply(raw, npc);
       // Cut off by the token limit (and not by the user's Stop): drop the unfinished tail.
       if (!this.stopRequested && truncated !== false) reply.content = finishCutoff(reply.content, { markIfNoBreak: truncated === true });
@@ -87,7 +93,7 @@ export class Chat {
     this.summaryPromise = (async () => {
       let did = false;
       try {
-        const npc = getNpc(npcId);
+        const npc = this.h.getCharacter?.(npcId); if (!npc) return false;
         for (let pass = 0; pass < 3 && !this.summaryAborted; pass++) {
           const mem = this.mem[npcId] || { summary: '', through: 0 };
           const pending = pendingToFold(this.messages(npcId), mem.through, this.h.getContext?.(npcId)?.budget);
