@@ -1,11 +1,12 @@
-import { CONFIG, APP, MODELS, LENGTHS, LIGHT_CONTEXT, getModel, modelVersion, DEFAULT_MODEL_KEY } from './config.js';
+import { CONFIG, APP, MODELS, LENGTHS, LIGHT_CONTEXT, PROACTIVE, getModel, modelVersion, DEFAULT_MODEL_KEY } from './config.js';
 import * as LLM from './llm.js';
 import * as Store from './storage.js';
 import { Chat } from './chat.js';
 import { Speech } from './speech.js';
 import { UpdateChecker } from './update-checker.js';
 import * as ui from './ui.js';
-import { resolveTime, PERIOD_KEYS } from './world.js';
+import { resolveTime, resolveDate, parseFixedDate, PERIOD_KEYS } from './world.js';
+import { nextDelay, pickSpeaker, blockReason, INTERVAL_KEYS } from './proactive.js';
 import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer } from './customize.js';
 import { MAX_CHARACTERS, CLIMITS, SOFT_TOTAL_CHARS, blankCharacter, sanitizeCharacter, validateCharacter, newCharacterId, promptChars } from './characters.js';
 import { SAMPLES, characterFromSample } from './samples.js';
@@ -35,13 +36,17 @@ if (!charById(settings.selectedNpc)) settings.selectedNpc = characters[0]?.id ??
 if (!MODELS.some((m) => m.key === settings.model)) settings.model = DEFAULT_MODEL_KEY;
 if (settings.timeMode !== 'auto' && !PERIOD_KEYS.includes(settings.timeMode)) settings.timeMode = 'auto';
 if (!LENGTH_KEYS.includes(settings.replyLength)) settings.replyLength = 'normal';
+if (settings.dateMode !== 'fixed' || !parseFixedDate(settings.fixedDate)) { settings.dateMode = 'auto'; settings.fixedDate = ''; }
+if (!INTERVAL_KEYS.includes(settings.proactiveInterval)) settings.proactiveInterval = 'normal';
 const nowTime = () => resolveTime(settings.timeMode);
 const budget = () => { const c = settings.lightMode ? LIGHT_CONTEXT : (loadedDef || selectedDef()).context; return { budgetChars: c.historyChars, maxMessages: c.maxMessages }; };
-const getContext = () => ({ budget: budget(), memoryOn: settings.memoryOn, player: custom.player, world: custom.world, time: nowTime(), length: LENGTHS[settings.replyLength] });
+const getContext = () => ({ budget: budget(), memoryOn: settings.memoryOn, player: custom.player, world: custom.world, time: nowTime(), calendar: resolveDate(settings.dateMode, settings.fixedDate), length: LENGTHS[settings.replyLength] });
 const speech = new Speech();
 speech.on = settings.speechOn; speech.rate = settings.rate;
 let modelReady = false, firstTokenAt = 0, slowHintShown = false, lastStats = null;
 const runs = []; // diagnostics (newest last)
+const unread = new Set(); // character ids with an unread spontaneous message
+let proactiveTimer = null, proactiveStreak = 0, lastSpeakerId = null, startupDone = false;
 LLM.setUseWorker(settings.useWorker);
 const save = () => Store.saveSettings(settings);
 const npcNow = () => charById(settings.selectedNpc);
@@ -93,7 +98,7 @@ function refreshVoices() {
 }
 
 function refreshNpcList() {
-  ui.renderNpcCards(characters, settings.selectedNpc, selectNpc, openEditor);
+  ui.renderNpcCards(characters, settings.selectedNpc, selectNpc, openEditor, unread);
   $('npc-count').textContent = `${characters.length} / ${MAX_CHARACTERS}人`;
   const full = characters.length >= MAX_CHARACTERS;
   $('btn-add-char').disabled = full; $('btn-add-sample').disabled = full; $('btn-import-char').disabled = full;
@@ -102,7 +107,7 @@ function refreshNpcList() {
 function selectNpc(id) {
   if (chat.generating) return;
   speech.stop(); settings.selectedNpc = charById(id) ? id : null; save();
-  const npc = npcNow(); ui.markSelected(settings.selectedNpc); ui.setChatHeader(npc);
+  const npc = npcNow(); if (npc && unread.delete(npc.id)) refreshNpcList(); ui.markSelected(settings.selectedNpc); ui.setChatHeader(npc);
   if (npc) chat.ensureGreeting(npc.id, nowTime().key);
   render(); refreshVoices(); syncCustomUI();
 }
@@ -112,6 +117,7 @@ async function send() {
   if (!text || !npcNow()) return;
   if (!modelReady) return ui.toast('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
   input.value = ''; speech.stop(); ui.setGenerating(true); firstTokenAt = 0; lastStats = null; const t0 = Date.now();
+  proactiveStreak = 0; unread.delete(settings.selectedNpc); scheduleProactive(nextDelay(settings.proactiveInterval)); // the player is active: push the next spontaneous message back
   const id = settings.selectedNpc;
   const p = chat.send(id, text);
   render();
@@ -184,7 +190,7 @@ async function doLoad(def, { silent = false } = {}) {
     });
     loadedDef = def; modelReady = true;
     settings.autoLoad = true; settings.modelVersions[def.key] = modelVersion(def); save();
-    markReady(def);
+    markReady(def); startProactive();
     if (!silent) ui.toast(`「${def.short}」の準備ができました。`);
     return true;
   } catch (e) {
@@ -235,8 +241,41 @@ function gpuMessage(r) {
   return 'WebGPUの初期化でエラーが発生しました。';
 }
 
+// ---- spontaneous NPC messages (one speaker at a time, short, can be turned off) ----
+function stopProactive() { clearTimeout(proactiveTimer); proactiveTimer = null; }
+function scheduleProactive(ms) {
+  clearTimeout(proactiveTimer); proactiveTimer = null;
+  if (!settings.proactiveOn) return;
+  proactiveTimer = setTimeout(tickProactive, ms);
+}
+/** Starts the chain once the model is ready (first message shortly after launch, then spaced out). */
+function startProactive() {
+  if (!settings.proactiveOn || !modelReady || !characters.length || proactiveTimer !== null) return;
+  scheduleProactive(startupDone ? nextDelay(settings.proactiveInterval) : PROACTIVE.startupDelayMs);
+}
+async function tickProactive() {
+  proactiveTimer = null;
+  const reason = blockReason({ enabled: settings.proactiveOn, modelReady, hidden: document.hidden, busy: busy || chat.busy, typing: $('input').value.trim() !== '', streak: proactiveStreak, characters: characters.length > 0 });
+  if (['disabled', 'no-characters', 'model-not-ready', 'streak-limit'].includes(reason)) return; // restarted by an event (model ready / toggle / the player writes)
+  if (reason) return scheduleProactive(PROACTIVE.retryMs);
+  startupDone = true;
+  const blocked = characters.filter((c) => chat.hasUnansweredProactive(c.id)).map((c) => c.id);
+  const speaker = pickSpeaker({ characters, lastSpeakerId, blockedIds: blocked });
+  if (!speaker) return scheduleProactive(nextDelay(settings.proactiveInterval));
+  const msg = await chat.speakFirst(speaker.id);
+  if (msg && charById(speaker.id)) {
+    lastSpeakerId = speaker.id; proactiveStreak++;
+    if (settings.selectedNpc === speaker.id) { render(); say(msg.content); }
+    else { unread.add(speaker.id); refreshNpcList(); ui.toast(`${speaker.name}さんが話しかけてきました。`, 6000); }
+  }
+  refreshModelUI();
+  if (proactiveStreak < PROACTIVE.maxStreak) scheduleProactive(nextDelay(settings.proactiveInterval));
+}
+
 // ---- world time / player settings ----
 function updateTimeBadge() {
+  const dt = resolveDate(settings.dateMode, settings.fixedDate);
+  ui.setBadge('badge-date', 'idle', `📅 ${dt.m}月${dt.d}日(${dt.weekday})・${dt.seasonLabel}${dt.auto ? '' : '（固定）'}`);
   const t = nowTime();
   const hh = String(t.hour).padStart(2, '0'), mm = String(t.minute).padStart(2, '0');
   ui.setBadge('badge-time', 'idle', `🕒 ${t.label}${t.auto ? `（${hh}:${mm}）` : '（固定）'}`);
@@ -258,6 +297,8 @@ function syncCustomUI() {
   $('cnt-player-profile').textContent = custom.player.profile.length; $('cnt-player-personality').textContent = custom.player.personality.length;
   $('txt-world').value = custom.world; $('cnt-world').textContent = custom.world.length;
   $('sel-time').value = settings.timeMode; $('sel-length').value = settings.replyLength;
+  $('sel-date').value = settings.dateMode; $('lbl-fixed-date').hidden = settings.dateMode !== 'fixed'; $('inp-fixed-date').value = settings.fixedDate;
+  $('chk-proactive').checked = settings.proactiveOn; $('sel-proactive').value = settings.proactiveInterval;
   updateTimeBadge();
 }
 function persistCustom() {
@@ -269,6 +310,15 @@ function wireCustom() {
   $('txt-world').addEventListener('input', (e) => { custom.world = e.target.value.slice(0, LIMITS.world); $('cnt-world').textContent = custom.world.length; persistCustom(); });
   $('sel-time').addEventListener('change', (e) => { settings.timeMode = e.target.value; save(); updateTimeBadge(); });
   $('sel-length').addEventListener('change', (e) => { settings.replyLength = e.target.value; save(); });
+  const sp = $('sel-proactive'); sp.textContent = ''; for (const [k, v] of Object.entries(PROACTIVE.intervals)) sp.add(new Option(v.label, k));
+  $('sel-date').addEventListener('change', (e) => {
+    settings.dateMode = e.target.value; $('lbl-fixed-date').hidden = settings.dateMode !== 'fixed';
+    if (settings.dateMode === 'fixed' && !parseFixedDate(settings.fixedDate)) { const d = new Date(); settings.fixedDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; $('inp-fixed-date').value = settings.fixedDate; }
+    save(); updateTimeBadge();
+  });
+  $('inp-fixed-date').addEventListener('change', (e) => { if (parseFixedDate(e.target.value)) { settings.fixedDate = e.target.value; save(); updateTimeBadge(); } });
+  $('chk-proactive').addEventListener('change', (e) => { settings.proactiveOn = e.target.checked; save(); if (settings.proactiveOn) startProactive(); else stopProactive(); });
+  sp.addEventListener('change', (e) => { settings.proactiveInterval = e.target.value; save(); if (settings.proactiveOn) scheduleProactive(nextDelay(settings.proactiveInterval)); });
   setInterval(updateTimeBadge, 30000);
   const player = () => (custom.player || (custom.player = sanitizePlayer({})));
   $('inp-player-name').maxLength = LIMITS.playerName;
@@ -338,7 +388,7 @@ function saveEditor() {
   const wasNew = !editingId; editingId = null;
   $('dlg-char').close();
   refreshNpcList();
-  if (wasNew) { selectNpc(c.id); Store.requestPersistence().then(updateDataInfo); } else { ui.setChatHeader(npcNow()); render(); syncCustomUI(); refreshVoices(); }
+  if (wasNew) { selectNpc(c.id); startProactive(); Store.requestPersistence().then(updateDataInfo); } else { ui.setChatHeader(npcNow()); render(); syncCustomUI(); refreshVoices(); }
   ui.toast(dup ? '保存しました（同じ名前の住人がいます）。' : '保存しました。');
 }
 function deleteEditing() {

@@ -11,6 +11,10 @@ const DEFAULT_SETTINGS = {
   model: 'lfm25-350m',   // selected model key (see config.js MODELS)
   timeMode: 'auto',      // 'auto' (device clock) | morning|day|evening|night|late
   replyLength: 'normal', // short|normal|long
+  dateMode: 'auto',      // 'auto' (device date) | 'fixed'
+  fixedDate: '',         // 'YYYY-MM-DD' when dateMode === 'fixed'
+  proactiveOn: true,     // NPCs sometimes speak first (short messages)
+  proactiveInterval: 'normal', // short|normal|long
   useWorker: true,       // run inference in a Web Worker (falls back to the main thread automatically)
   lightMode: false,      // short history to reduce GPU load
   memoryOn: true,        // fold old conversation into a short summary ("memory")

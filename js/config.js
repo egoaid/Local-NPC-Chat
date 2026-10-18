@@ -32,6 +32,18 @@ export const LENGTHS = Object.freeze({
   long: Object.freeze({ label: '長め', maxNewTokens: 280, sentences: '3〜5文', chars: 200 })
 });
 
+/** Spontaneous "NPC speaks first" messages: very short on purpose (less GPU work). */
+export const PROACTIVE = Object.freeze({
+  length: Object.freeze({ label: '話しかけ', maxNewTokens: 70, sentences: '1〜2文', chars: 50 }),
+  intervals: Object.freeze({
+    short: Object.freeze({ label: '短め（約3分おき）', ms: 3 * 60 * 1000 }),
+    normal: Object.freeze({ label: 'ふつう（約8分おき）', ms: 8 * 60 * 1000 }),
+    long: Object.freeze({ label: '長め（約20分おき）', ms: 20 * 60 * 1000 })
+  }),
+  startupDelayMs: 4000, retryMs: 20000, jitter: 0.25,
+  maxStreak: 3 // stop after this many unanswered spontaneous messages (until the player writes something)
+});
+
 export const CONFIG = Object.freeze({
   cacheName: 'transformers-cache', // Cache Storage name used by Transformers.js (holds downloaded models)
   idleReleaseMs: 5 * 60 * 1000,    // release GPU memory after the tab has been hidden this long

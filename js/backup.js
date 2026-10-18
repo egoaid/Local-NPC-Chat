@@ -1,7 +1,8 @@
 // Backup / restore and single-character files (JSON). Validation is strict; nothing here touches the DOM.
 import { MAX_CHARACTERS, sanitizeCharacter, newCharacterId } from './characters.js';
 import { sanitizeCustom, parseImport as parseLegacySettings, LENGTH_KEYS } from './customize.js';
-import { PERIOD_KEYS } from './world.js';
+import { PERIOD_KEYS, parseFixedDate } from './world.js';
+import { INTERVAL_KEYS } from './proactive.js';
 
 export const BACKUP_SCHEMA = 'local-npc-chat-rpg/backup';
 export const CHARACTER_SCHEMA = 'local-npc-chat-rpg/character';
@@ -13,7 +14,10 @@ export function buildBackup({ characters, custom, settings, conversations, memor
   const out = {
     schema: BACKUP_SCHEMA, schemaVersion: 1, appVersion, exportedAt: now.toISOString(), withChats,
     characters, world: custom.world || '', player: custom.player || {},
-    settings: { timeMode: settings.timeMode, replyLength: settings.replyLength, memoryOn: settings.memoryOn }
+    settings: {
+      timeMode: settings.timeMode, replyLength: settings.replyLength, memoryOn: settings.memoryOn,
+      dateMode: settings.dateMode, fixedDate: settings.fixedDate, proactiveOn: settings.proactiveOn, proactiveInterval: settings.proactiveInterval
+    }
   };
   if (withChats) { out.conversations = conversations || {}; out.memory = memory || {}; out.relations = relations || {}; }
   return out;
@@ -77,6 +81,11 @@ export function parseBackup(text) {
   if (j.settings?.timeMode === 'auto' || PERIOD_KEYS.includes(j.settings?.timeMode)) settings.timeMode = j.settings.timeMode;
   if (LENGTH_KEYS.includes(j.settings?.replyLength)) settings.replyLength = j.settings.replyLength;
   if (typeof j.settings?.memoryOn === 'boolean') settings.memoryOn = j.settings.memoryOn;
+  if (j.settings?.dateMode === 'auto' || (j.settings?.dateMode === 'fixed' && parseFixedDate(j.settings?.fixedDate))) {
+    settings.dateMode = j.settings.dateMode; settings.fixedDate = j.settings.dateMode === 'fixed' ? j.settings.fixedDate : '';
+  }
+  if (typeof j.settings?.proactiveOn === 'boolean') settings.proactiveOn = j.settings.proactiveOn;
+  if (INTERVAL_KEYS.includes(j.settings?.proactiveInterval)) settings.proactiveInterval = j.settings.proactiveInterval;
   const data = { characters, custom, settings };
   if (j.withChats && j.conversations && typeof j.conversations === 'object') {
     data.conversations = {}; data.memory = {}; data.relations = {};

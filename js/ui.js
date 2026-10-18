@@ -11,7 +11,7 @@ export function toast(msg, ms = 4000) {
 
 export function setBadge(id, cls, text) { const b = $(id); b.className = `badge badge-${cls}`; b.textContent = text; }
 
-export function renderNpcCards(list, selectedId, onSelect, onEdit) {
+export function renderNpcCards(list, selectedId, onSelect, onEdit, unread = new Set()) {
   const box = $('npc-cards'); box.textContent = '';
   for (const n of list) {
     const wrap = document.createElement('div'); wrap.className = 'npc-item';
@@ -20,6 +20,7 @@ export function renderNpcCards(list, selectedId, onSelect, onEdit) {
     b.setAttribute('aria-pressed', String(n.id === selectedId));
     b.innerHTML = '<span class="n"></span><span class="o"></span><span class="d"></span>';
     b.querySelector('.n').textContent = n.name;
+    if (unread.has(n.id)) { const d = document.createElement('span'); d.className = 'new-dot'; d.textContent = ' 💬新着'; d.setAttribute('aria-label', '新しいメッセージ'); b.querySelector('.n').appendChild(d); }
     b.querySelector('.o').textContent = cardLine(n);
     b.querySelector('.d').textContent = cardSummary(n);
     b.addEventListener('click', () => onSelect(n.id));

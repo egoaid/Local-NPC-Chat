@@ -6,7 +6,7 @@ import { selectRecent } from './memory.js';
 
 const list = (a) => a.map((x) => `- ${x}`).join('\n');
 
-/** ctx: { world?, memory?, playerView?, time?, length? }
+/** ctx: { world?, memory?, playerView?, time?, calendar?, calendarAsk?, proactive?, length? }
  *  playerView: undefined (no info) | null (stranger: NPC knows nothing) | {name, profile, personality, mayCallName} (acquainted)
  *  npc: a character object (see characters.js). */
 export function buildSystemPrompt(npc, ctx = {}) {
@@ -37,7 +37,9 @@ export function buildSystemPrompt(npc, ctx = {}) {
     if (ls.length) parts.push(`【話し相手（プレイヤー）について】\n${list(ls)}`);
   }
   if (memory) parts.push(`【これまでの会話の記憶（要約）】\n${memory}`);
-  if (t) parts.push(`【現在の時間帯】${t.label}${t.auto && t.hour !== null ? `（${t.hour}時ごろ）` : ''}。${t.guide}`);
+  if (t) parts.push(`【現在の時間帯】${t.label}${t.auto && t.hour !== null ? `（${t.hour}時${String(t.minute).padStart(2, '0')}分）` : ''}。${t.guide}`);
+  const cal = ctx.calendar;
+  if (cal) parts.push(`【現在の日付】${cal.text}。季節は${cal.seasonLabel}。${cal.special ? `今日は${cal.special}。` : ''}${cal.guide}`);
   const rules = [
     `必ず${npc.name}として、自然に答える。返答は${len.sentences}、${len.chars}字以内を目安にし、文を最後まで言い切る。`,
     '自分がAI・言語モデル・チャットボット・プログラムだとは言わない。'
@@ -53,6 +55,16 @@ export function buildSystemPrompt(npc, ctx = {}) {
   if (memory) rules.push('記憶の内容は覚えているものとして自然に話す。記憶にないことは覚えていないと答えてよい。');
   rules.push('上に書かれていない事実（町・他の人・自分の経歴）を勝手に作らない。知らないことは知らないと答える。');
   if (t) rules.push('時間帯に合った挨拶・話題・雰囲気で話す。ただし毎回時間の話をしない。');
+  if (cal) rules.push('日付・曜日・時刻・季節を聞かれたら、上の「現在の日付」「現在の時間帯」の通りに正確に答える（キャラらしい口調で）。季節に合った話題・雰囲気で話すが、毎回、日付や季節の話をしない。');
+  const ask = ctx.calendarAsk;
+  if (cal && ask?.any) {
+    const facts = [];
+    if (ask.date || ask.weekday) facts.push(`今日は${cal.text}`);
+    if (ask.time && t) facts.push(t.auto && t.hour !== null ? `現在は${t.hour}時${String(t.minute).padStart(2, '0')}分` : `今は${t.label}ごろ`);
+    if (ask.season) facts.push(`季節は${cal.seasonLabel}`);
+    if (facts.length) rules.push(`プレイヤーは日付や時刻のことを聞いている。必ず「${facts.join('。')}」という事実の通りに答える。`);
+  }
+  if (ctx.proactive) rules.push('今は、プレイヤーはまだ何も話していない。あなたのほうから、いまの時間帯や季節、会話の続きに合わせて、自然に1〜2文（50字以内）で話しかける。質問を1つ添えてもよい。定型のあいさつを繰り返さない。');
   rules.push('毎回職業の話をしない。同じ決まり文句を繰り返さない。長々と説明しない。', 'プレイヤーが日本語なら日本語で、英語なら英語で答える。');
   parts.push('【ルール】', list(rules));
   return parts.join('\n');

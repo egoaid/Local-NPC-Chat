@@ -6,7 +6,7 @@ const ASSETS = [
   './', 'index.html', 'manifest.json', 'version.json',
   'css/layout.css', 'css/chat.css', 'css/npc-selection.css', 'css/status.css', 'css/responsive.css',
   'js/version.js', 'js/app.js', 'js/config.js', 'js/samples.js', 'js/characters.js', 'js/migrate.js', 'js/backup.js', 'js/llm.js', 'js/llm-core.js', 'js/llm-worker.js', 'js/llm-prompts.js', 'js/chat.js',
-  'js/world.js', 'js/memory.js', 'js/player.js', 'js/customize.js', 'js/speech.js', 'js/storage.js', 'js/ui.js', 'js/update-checker.js',
+  'js/world.js', 'js/proactive.js', 'js/memory.js', 'js/player.js', 'js/customize.js', 'js/speech.js', 'js/storage.js', 'js/ui.js', 'js/update-checker.js',
   'vendor/transformers.web.min.js', 'vendor/ort.webgpu.bundle.min.mjs', 'vendor/onnxruntime-common-shim.mjs', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/favicon-32.png', 'icons/apple-touch-icon.png'
 ];
 

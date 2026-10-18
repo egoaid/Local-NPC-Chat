@@ -30,6 +30,7 @@
   <div class="badges" role="status" aria-live="polite">
     <span id="badge-model" class="badge badge-idle">モデル: 未読み込み</span>
     <span id="badge-gpu" class="badge badge-idle">WebGPU: 確認中</span>
+    <span id="badge-date" class="badge badge-idle">📅 --</span>
     <span id="badge-time" class="badge badge-idle">🕒 --</span>
   </div>
 </header>
@@ -95,6 +96,17 @@
           <option value="evening">夕方に固定</option><option value="night">夜に固定</option><option value="late">深夜に固定</option>
         </select>
       </label>
+      <label>世界の日付
+        <select id="sel-date"><option value="auto">端末の日付に合わせる</option><option value="fixed">日付を固定する</option></select>
+      </label>
+      <label id="lbl-fixed-date" hidden>固定する日付 <input id="inp-fixed-date" type="date"></label>
+      <p class="muted small">住人は、日付・曜日・季節（春夏秋冬）を知っていて、「今日は何日？」に答えます。季節に合わせた話題でも話します。</p>
+      <fieldset class="player-box">
+        <legend>住人から話しかけてくる</legend>
+        <label class="toggle"><input id="chk-proactive" type="checkbox"> 住人が自分から話しかけてくる（短い一言・1人ずつ）</label>
+        <label>間隔 <select id="sel-proactive"></select></label>
+        <p class="muted small">AIモデルの準備ができると、住人が<strong>1人だけ</strong>話しかけます。その後は時間をおいて、1人ずつ話しかけます。話しかけるたびにGPUを使うので、重いときはオフにしてください。入力を始めると中断され、返事をしないまま3回話しかけたあとは止まります。</p>
+      </fieldset>
       <label>返答の長さ
         <select id="sel-length"><option value="short">短め</option><option value="normal">ふつう</option><option value="long">長め</option></select>
       </label>
