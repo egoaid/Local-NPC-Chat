@@ -18,11 +18,12 @@ export function pickSpeaker({ characters, lastSpeakerId = null, blockedIds = [] 
 }
 
 /** Everything that must be true right now for a spontaneous message to start. Returns null if OK, else the reason. */
-export function blockReason({ enabled, modelReady, hidden, busy, typing, streak, characters }) {
+export function blockReason({ enabled, modelReady, hidden, busy, typing, streak, characters, groupActive = false }) {
   if (!enabled) return 'disabled';
   if (!characters) return 'no-characters';
   if (!modelReady) return 'model-not-ready';
   if (hidden) return 'hidden';
+  if (groupActive) return 'group';
   if (busy) return 'busy';
   if (typing) return 'typing';
   if (streak >= PROACTIVE.maxStreak) return 'streak-limit';

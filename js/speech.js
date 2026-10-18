@@ -47,20 +47,23 @@ export class Speech {
   choose(lang, npc, prefs) { return pickVoice(this.voices, lang, npc.voice.gender, prefs?.[lang]); }
   stop() { if (this.supported) speechSynthesis.cancel(); }
   speak(text, npc, prefs) {
-    if (!this.supported || !text) return { ok: false, reason: 'unsupported' };
+    if (!this.supported || !text) return { ok: false, reason: 'unsupported', done: Promise.resolve() };
     const lang = detectLang(text);
     const pick = this.choose(lang, npc, prefs);
     this.stop();
     const sentences = text.match(/[^。！？!?.\n]+[。！？!?.]*/g) || [text];
+    let resolveDone; const done = new Promise((r) => { resolveDone = r; });
+    let lastU = null;
     for (const s of sentences) {
       if (!s.trim()) continue;
-      const u = new SpeechSynthesisUtterance(s.trim());
+      const u = new SpeechSynthesisUtterance(s.trim()); lastU = u;
       u.lang = pick?.voice?.lang || (lang === 'ja' ? 'ja-JP' : 'en-US');
       if (pick) u.voice = pick.voice;
       u.rate = this.rate;
       u.pitch = npc.voice.pitch;
       speechSynthesis.speak(u);
     }
-    return { ok: !!pick, reason: pick ? null : 'no-voice', pick };
+    if (lastU) { lastU.onend = lastU.onerror = () => resolveDone(); setTimeout(resolveDone, Math.max(3000, text.length * 450)); } else resolveDone();
+    return { ok: !!pick, reason: pick ? null : 'no-voice', pick, done };
   }
 }

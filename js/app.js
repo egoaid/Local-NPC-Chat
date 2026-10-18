@@ -7,6 +7,7 @@ import { UpdateChecker } from './update-checker.js';
 import * as ui from './ui.js';
 import { resolveTime, resolveDate, parseFixedDate, PERIOD_KEYS } from './world.js';
 import { nextDelay, pickSpeaker, blockReason, INTERVAL_KEYS } from './proactive.js';
+import { GroupSession, GROUP } from './group.js';
 import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer } from './customize.js';
 import { MAX_CHARACTERS, CLIMITS, SOFT_TOTAL_CHARS, blankCharacter, sanitizeCharacter, validateCharacter, newCharacterId, promptChars } from './characters.js';
 import { SAMPLES, characterFromSample } from './samples.js';
@@ -102,6 +103,7 @@ function refreshNpcList() {
   $('npc-count').textContent = `${characters.length} / ${MAX_CHARACTERS}人`;
   const full = characters.length >= MAX_CHARACTERS;
   $('btn-add-char').disabled = full; $('btn-add-sample').disabled = full; $('btn-import-char').disabled = full;
+  renderGroupPeople(); updateGroupUI();
 }
 
 function selectNpc(id) {
@@ -148,6 +150,7 @@ function classify(e, def) {
 }
 
 async function refreshModelUI() {
+  updateGroupUI();
   const def = selectedDef();
   const st = await LLM.getCacheStatus(def);
   const isLoaded = loadedDef?.key === def.key;
@@ -255,7 +258,7 @@ function startProactive() {
 }
 async function tickProactive() {
   proactiveTimer = null;
-  const reason = blockReason({ enabled: settings.proactiveOn, modelReady, hidden: document.hidden, busy: busy || chat.busy, typing: $('input').value.trim() !== '', streak: proactiveStreak, characters: characters.length > 0 });
+  const reason = blockReason({ enabled: settings.proactiveOn, modelReady, hidden: document.hidden, busy: busy || chat.busy, typing: $('input').value.trim() !== '', streak: proactiveStreak, characters: characters.length > 0, groupActive: groupActive() });
   if (['disabled', 'no-characters', 'model-not-ready', 'streak-limit'].includes(reason)) return; // restarted by an event (model ready / toggle / the player writes)
   if (reason) return scheduleProactive(PROACTIVE.retryMs);
   startupDone = true;
@@ -441,6 +444,141 @@ function wireCharacters() {
   $('f-name').maxLength = CLIMITS.name;
 }
 
+// ---- group modes: characters talk to each other (story / shiritori) ----
+let group = null; // { session, state: 'running'|'paused'|'waiting'|'finished', stepMode, pauseRequested }
+const gSelected = new Set();
+let groupLoopRunning = false;
+const groupActive = () => !!group && group.state !== 'finished';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const setGStatus = (t) => { $('g-status').textContent = t; };
+
+function renderGroupPeople() {
+  for (const id of [...gSelected]) if (!charById(id)) gSelected.delete(id);
+  const box = $('g-people'); box.textContent = '';
+  for (const c of characters) {
+    const lab = document.createElement('label'); lab.className = 'toggle';
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.value = c.id; cb.checked = gSelected.has(c.id);
+    cb.disabled = groupActive() || (!cb.checked && gSelected.size >= GROUP.maxParticipants);
+    cb.addEventListener('change', () => { if (cb.checked) gSelected.add(c.id); else gSelected.delete(c.id); renderGroupPeople(); updateGroupUI(); });
+    lab.append(cb, document.createTextNode(` ${c.name}`)); box.appendChild(lab);
+  }
+}
+function updateGroupUI() {
+  if (!$('sel-gmode')) return;
+  const mode = $('sel-gmode').value, active = groupActive(), st = group?.state;
+  $('g-story-opts').hidden = mode !== 'story'; $('g-shiri-opts').hidden = mode !== 'shiritori';
+  $('g-people-hint').textContent = characters.length < 2 && mode === 'story' ? '物語づくりには住人が2人以上必要です（「サンプル住人」から追加できます）。' : `選択中: ${gSelected.size}人（最大${GROUP.maxParticipants}人）`;
+  $('btn-gstart').hidden = active; $('btn-gstart').disabled = !modelReady;
+  $('btn-gpause').hidden = !(st === 'running' || st === 'paused'); $('btn-gpause').textContent = st === 'paused' ? '再開' : '一時停止';
+  $('btn-gstep').hidden = st !== 'paused';
+  $('btn-gstop').hidden = !active;
+  $('g-directive').hidden = !(active && group.session.mode === 'story');
+  $('g-word').hidden = st !== 'waiting';
+  const has = !!group && group.session.lines.length > 0;
+  $('btn-gsave').hidden = !has; $('btn-gcopy').hidden = !has;
+  for (const id of ['sel-gmode', 'inp-gtitle', 'sel-gturns', 'sel-gpace', 'chk-gplayer']) $(id).disabled = active;
+}
+function renderGroupLine(line) {
+  const d = document.createElement('div'); d.className = `gline ${line.kind}`;
+  if (line.kind !== 'system') { const n = document.createElement('span'); n.className = 'gname'; n.textContent = line.kind === 'directive' ? 'あなたの指示' : line.name; d.appendChild(n); }
+  const t = document.createElement('span'); const rd = line.reading && line.reading !== line.text.replace(/[「」]/g, '') ? `（${line.reading}）` : '';
+  t.textContent = line.text + rd; d.appendChild(t);
+  const log = $('group-log'); log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+async function showGroupLine(line) {
+  renderGroupLine(line);
+  if (speech.on && speech.supported && line.kind === 'npc') { // one voice at a time; wait until it finishes
+    const c = charById(line.speakerId);
+    if (c) await speech.speak(line.text.replace(/[「」]/g, ''), c, settings.voices[c.id]).done;
+  }
+}
+function pauseGroup(msg) { if (!group || group.state === 'finished') return; group.state = 'paused'; group.pauseRequested = false; setGStatus(msg); updateGroupUI(); }
+function finishGroup(result) {
+  if (!group) return; group.state = 'finished';
+  const s = group.session;
+  setGStatus(s.mode === 'story' ? 'おしまい。「テキストで保存」で物語を残せます。' : result?.reason === 'lost' ? `ゲーム終了（${s.order.find((p) => p.id === result.loser)?.name || ''}の負け）。` : 'ゲーム終了。');
+  updateGroupUI(); refreshModelUI();
+}
+function startGroup() {
+  if (groupActive()) return;
+  if (!modelReady) return setGStatus('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
+  if (chat.busy) return setGStatus('いまは別の処理中です。少し待ってからもう一度お試しください。');
+  const mode = $('sel-gmode').value, chars = [...gSelected].map(charById).filter(Boolean);
+  const withPlayer = mode === 'shiritori' && $('chk-gplayer').checked;
+  if (mode === 'story' && chars.length < 2) return setGStatus('物語づくりには、2人以上の住人を選んでください。');
+  if (mode === 'shiritori' && chars.length + (withPlayer ? 1 : 0) < 2) return setGStatus('しりとりには、あなたを含めて2人以上が必要です。');
+  const title = $('inp-gtitle').value.trim();
+  if (mode === 'story' && !title) return setGStatus('物語のタイトル（テーマ）を入力してください。');
+  const session = new GroupSession({ mode, characters: chars, title, maxTurns: Number($('sel-gturns').value) || GROUP.story.defaultTurns, includePlayer: withPlayer, playerName: custom.player.name || 'あなた', generate: (m, o) => chat.generateExclusive(m, o) });
+  group = { session, state: 'running', stepMode: $('sel-gpace').value === 'step', pauseRequested: false };
+  $('group-log').textContent = '';
+  if (mode === 'story') renderGroupLine({ kind: 'system', text: `物語『${session.title}』を、${chars.map((c) => c.name).join('・')}で語り継ぎます。` });
+  setGStatus('始めます…'); updateGroupUI(); runGroup();
+}
+async function runGroup() {
+  if (groupLoopRunning || !group) return;
+  groupLoopRunning = true; const g = group; let busyTries = 0;
+  try {
+    while (g.state === 'running') {
+      if (document.hidden) { pauseGroup('タブが見えなくなったため、一時停止しました。'); break; }
+      if (!modelReady) { pauseGroup('AIモデルが読み込まれていないため、一時停止しました。'); break; }
+      setGStatus(`${g.session.current()?.name || ''}${g.session.mode === 'story' ? 'が語っています…' : 'が考えています…'}`);
+      let r;
+      try { r = await g.session.step(); } catch (e) { console.error(e); pauseGroup('生成でエラーが出たため、一時停止しました。'); showDetails(e); break; }
+      if (g.state === 'finished' || r.type === 'stopped') break;
+      if (r.type === 'busy') { if (++busyTries > 25) { pauseGroup('他の処理が長引いているため、一時停止しました。'); break; } await sleep(800); continue; }
+      busyTries = 0;
+      if (r.type === 'aborted') { pauseGroup('チャットを送ったため、会話を一時停止しました。「再開」で続けられます。'); break; }
+      if (r.type === 'wait-player') { g.state = 'waiting'; setGStatus(`あなたの番です。「${r.required}」から始まる言葉を答えてください。`); updateGroupUI(); $('inp-gword').focus(); break; }
+      if (r.line) await showGroupLine(r.line);
+      if (r.system) await showGroupLine(r.system);
+      if (g.state === 'finished') break;
+      if (r.type === 'end') { finishGroup(r.result); break; }
+      updateGroupUI();
+      if (g.stepMode) { pauseGroup('「次の発言」で続けます。'); break; }
+      if (g.pauseRequested) { pauseGroup('一時停止中です。'); break; }
+      await sleep(GROUP.paceMs);
+    }
+  } finally { groupLoopRunning = false; updateGroupUI(); }
+}
+async function submitGroupWord() {
+  if (!group || group.state !== 'waiting') return;
+  const r = group.session.playerWord($('inp-gword').value);
+  if (!r.ok) return setGStatus(r.error);
+  $('inp-gword').value = ''; group.state = 'running'; updateGroupUI();
+  await showGroupLine(r.result.line); if (r.result.system) await showGroupLine(r.result.system);
+  if (r.result.type === 'end') return finishGroup(r.result.result);
+  runGroup();
+}
+function wireGroup() {
+  const turns = $('sel-gturns'); turns.textContent = ''; for (const n of GROUP.story.turnChoices) turns.add(new Option(`${n}発言`, n)); turns.value = GROUP.story.defaultTurns;
+  $('sel-gmode').addEventListener('change', updateGroupUI);
+  $('btn-gstart').addEventListener('click', startGroup);
+  $('btn-gpause').addEventListener('click', () => {
+    if (!group) return;
+    if (group.state === 'running') { group.pauseRequested = true; setGStatus('この発言のあとで一時停止します。'); }
+    else if (group.state === 'paused') { group.state = 'running'; updateGroupUI(); runGroup(); }
+  });
+  $('btn-gstep').addEventListener('click', () => { if (group?.state === 'paused') { group.state = 'running'; updateGroupUI(); runGroup(); } });
+  $('btn-gstop').addEventListener('click', () => {
+    if (!group) return; group.session.stop(); group.state = 'finished'; chat.abortExclusive(); speech.stop();
+    setGStatus('終了しました。'); updateGroupUI(); refreshModelUI();
+  });
+  const directive = () => { const l = group?.session.insertDirective($('inp-gdirective').value); if (l) { renderGroupLine(l); $('inp-gdirective').value = ''; setGStatus('指示を入れました。次の発言に反映されます。'); updateGroupUI(); } };
+  $('btn-gdirective').addEventListener('click', directive);
+  $('btn-gword').addEventListener('click', submitGroupWord);
+  for (const [id, fn] of [['inp-gword', submitGroupWord], ['inp-gdirective', directive]]) $(id).addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) { e.preventDefault(); fn(); } });
+  $('btn-gforfeit').addEventListener('click', () => { const r = group?.session.forfeit(); if (r) { renderGroupLine(r.line); finishGroup(r.result); } });
+  $('btn-gsave').addEventListener('click', () => {
+    const blob = new Blob([group.session.exportText()], { type: 'text/plain' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `${group.session.mode === 'story' ? 'story' : 'shiritori'}-${stamp()}.txt`;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+  $('btn-gcopy').addEventListener('click', async () => { try { await navigator.clipboard.writeText(group.session.exportText()); ui.toast('コピーしました。'); } catch { ui.toast('コピーできませんでした。'); } });
+  document.addEventListener('visibilitychange', () => { if (document.hidden && group?.state === 'running') group.pauseRequested = true; });
+  updateGroupUI();
+}
+
 // ---- backup / data ----
 async function updateDataInfo() {
   const s = await Store.storageStatus();
@@ -555,7 +693,7 @@ async function registerSW(checker) {
 async function init() {
   $('ver').textContent = APP.version;
   document.title = `${APP.appName} v${APP.version}`;
-  wire(); wireCustom(); wireCharacters(); ui.setGenerating(false); ui.setChatEnabled(false);
+  wire(); wireCustom(); wireCharacters(); wireGroup(); ui.setGenerating(false); ui.setChatEnabled(false);
   refreshNpcList();
   speech.onVoices = refreshVoices;
   selectNpc(settings.selectedNpc);

@@ -15,12 +15,12 @@ export class Chat {
     this.convs = Store.loadConversations();
     this.mem = Store.loadMemory(); // { [npcId]: { summary, through } }
     this.rel = Store.loadRelations(); // { [npcId]: { knows: true } } -> has this NPC been introduced to the player?
-    this.generating = false; this.proactiveRunning = false; this.proactiveAborted = false; this.proactivePromise = null; this.summarizing = false; this.summaryAborted = false; this.summaryPromise = null;
+    this.generating = false; this.exclusive = false; this.exclusiveAborted = false; this.exclusivePromise = null; this.proactiveRunning = false; this.proactiveAborted = false; this.proactivePromise = null; this.summarizing = false; this.summaryAborted = false; this.summaryPromise = null;
     this.stopRequested = false;
     this.lastId = 0;
     for (const list of Object.values(this.convs)) for (const m of list) { if (!m.id) m.id = ++this.lastId; else this.lastId = Math.max(this.lastId, m.id); }
   }
-  get busy() { return this.generating || this.summarizing || this.proactiveRunning; }
+  get busy() { return this.generating || this.summarizing || this.proactiveRunning || this.exclusive; }
   newId() { this.lastId = Math.max(this.lastId + 1, Date.now()); return this.lastId; }
   messages(npcId) { return this.convs[npcId] || (this.convs[npcId] = []); }
   knows(npcId) { return !!this.rel[npcId]?.knows; }
@@ -33,6 +33,19 @@ export class Chat {
     const npc = this.h.getCharacter?.(npcId); if (!npc) return;
     const list = this.messages(npcId);
     if (!list.length) { list.push({ id: this.newId(), role: 'assistant', content: greetingFor(npc, periodKey), greeting: true }); this.save(); }
+  }
+  abortExclusive() { if (this.exclusive) { this.exclusiveAborted = true; this.llm.stop(); } }
+  /** One short generation for group modes. Never overlaps chat/summaries/spontaneous messages.
+   *  Returns {text, truncated, aborted}, or null if the engine is busy / not loaded (caller retries). The player's chat message aborts it. */
+  generateExclusive(messages, opts) {
+    if (this.busy || !this.llm.isLoaded()) return Promise.resolve(null);
+    this.exclusive = true; this.exclusiveAborted = false;
+    const run = (async () => {
+      try { const r = await this.llm.generate(messages, null, opts); return { ...r, aborted: this.exclusiveAborted }; }
+      finally { this.exclusive = false; }
+    })();
+    this.exclusivePromise = run.catch(() => null);
+    return run;
   }
   abortProactive() { if (this.proactiveRunning) { this.proactiveAborted = true; this.llm.stop(); } }
   hasUnansweredProactive(npcId) { const l = this.messages(npcId); const last = l[l.length - 1]; return !!(last && last.role === 'assistant' && last.proactive); }
@@ -89,6 +102,7 @@ export class Chat {
     const text = rawText.trim().slice(0, CONFIG.context.maxInputChars);
     if (!text || this.generating) return null;
     if (this.proactiveRunning) { this.abortProactive(); await this.proactivePromise; } // the player always comes first
+    if (this.exclusive) { this.abortExclusive(); await this.exclusivePromise; }
     if (this.summarizing) { this.abortSummary(); await this.summaryPromise; } // user comes first
     const npc = this.h.getCharacter?.(npcId); if (!npc) return null;
     const list = this.messages(npcId);

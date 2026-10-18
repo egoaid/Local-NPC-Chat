@@ -86,6 +86,53 @@
     </div>
   </section>
 
+  <section class="card group-card" aria-labelledby="group-h">
+    <details>
+      <summary id="group-h">みんなで遊ぶ（住人同士の会話：物語づくり・しりとり）</summary>
+      <label>モード
+        <select id="sel-gmode"><option value="story">物語づくり（即興でお話を作る）</option><option value="shiritori">しりとり</option></select>
+      </label>
+      <fieldset class="player-box">
+        <legend>参加する住人（2〜4人）</legend>
+        <div id="g-people" class="g-people"></div>
+        <p id="g-people-hint" class="muted small"></p>
+      </fieldset>
+      <div id="g-story-opts">
+        <label for="inp-gtitle">物語のタイトル・テーマ</label>
+        <input id="inp-gtitle" type="text" maxlength="40" autocomplete="off" placeholder="例：森の館で起きたサスペンスストーリー">
+        <label>長さ <select id="sel-gturns"></select></label>
+      </div>
+      <div id="g-shiri-opts" hidden>
+        <label class="toggle"><input id="chk-gplayer" type="checkbox"> あなたも参加する（ひらがなで答えます）</label>
+      </div>
+      <label>進め方
+        <select id="sel-gpace"><option value="auto">自動で進める</option><option value="step">1発言ずつ進める（軽い・じっくり）</option></select>
+      </label>
+      <div class="row">
+        <button id="btn-gstart" type="button">開始</button>
+        <button id="btn-gpause" type="button" class="secondary" hidden>一時停止</button>
+        <button id="btn-gstep" type="button" class="secondary" hidden>次の発言</button>
+        <button id="btn-gstop" type="button" class="danger" hidden>終了</button>
+      </div>
+      <p id="g-status" class="muted small" role="status"></p>
+      <div id="group-log" class="group-log" role="log" aria-live="polite"></div>
+      <div id="g-directive" class="row" hidden>
+        <input id="inp-gdirective" type="text" maxlength="80" autocomplete="off" placeholder="展開の指示（例：ここで停電が起きる）">
+        <button id="btn-gdirective" type="button" class="secondary">指示を入れる</button>
+      </div>
+      <div id="g-word" class="row" hidden>
+        <input id="inp-gword" type="text" maxlength="30" autocomplete="off" placeholder="ひらがなで答える">
+        <button id="btn-gword" type="button">答える</button>
+        <button id="btn-gforfeit" type="button" class="secondary">降参</button>
+      </div>
+      <div class="row">
+        <button id="btn-gsave" type="button" class="secondary" hidden>テキストで保存</button>
+        <button id="btn-gcopy" type="button" class="secondary" hidden>コピー</button>
+      </div>
+      <p class="muted small">軽く動かすための工夫：話すのは1回に1人だけ、1回の発言は短く（物語は60字ほど、しりとりは言葉だけ）、ルールの判定はAIではなくプログラムが行います。物語では直近の流れだけを読み、しりとりでは使った言葉の一覧だけを渡します。タブが見えないときは自動で一時停止し、あなたが普通のチャットを送ると生成は中断されます。</p>
+    </details>
+  </section>
+
   <section class="card custom-card" aria-labelledby="custom-h">
     <details>
       <summary id="custom-h">世界とプレイヤーの設定（時間・世界観・あなたの設定・返答の長さ・記憶）</summary>

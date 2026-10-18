@@ -38,3 +38,13 @@
 .form-error { color: var(--danger); min-height: 1.2em; font-size: .88rem; }
 #dlg-char { width: min(94vw, 520px); max-height: 92dvh; overflow-y: auto; }
 #diag-pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .78rem; background: var(--bg); padding: 8px; border-radius: 8px; }
+
+.group-card summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; font-weight: 700; }
+.group-card input[type=text], .group-card select { width: 100%; padding: 6px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; min-height: 44px; }
+.group-card .row input[type=text] { flex: 1 1 200px; width: auto; }
+.g-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 12px; }
+.group-log { max-height: 50dvh; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding: 6px; margin: 8px 0; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); min-height: 3rem; }
+.gline { padding: 6px 10px; border-radius: 10px; background: var(--npc); border: 1px solid var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
+.gline .gname { font-size: .78rem; color: var(--muted); display: block; }
+.gline.system { background: transparent; border-style: dashed; color: var(--muted); text-align: center; }
+.gline.directive, .gline.player { background: var(--me); }
