@@ -69,7 +69,7 @@ export function analyzeStory(lines, attempts, { retries = 0, temperature = null,
 /** runs: [{model:{key,short}, test, metrics, ratings?, nonsense?, words?}] -> one row per (model, test). */
 export function aggregate(runs) {
   const groups = new Map();
-  for (const r of runs) { const k = `${r.model?.key}|${r.test}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
+  for (const r of runs) { const k = `${r.model?.key}|${r.test}${r.test === 'scenario' ? `|${r.params?.strategy}|${r.params?.guard ? 'g' : 'n'}` : ''}`; if (!groups.has(k)) groups.set(k, []); groups.get(k).push(r); }
   const rows = [];
   for (const [k, rs] of groups) {
     const m = rs.map((r) => r.metrics), first = rs[0];
@@ -86,6 +86,11 @@ export function aggregate(runs) {
       const rated = rs.filter((r) => Array.isArray(r.nonsense));
       const words = sum(rated.map((r) => r.words?.length || 0));
       row.nonsenseRate = words ? sum(rated.map((r) => r.nonsense.length)) / words : null; // player-marked
+    } else if (first.test === 'scenario') {
+      Object.assign(row, { strategy: first.params?.strategy, guard: !!first.params?.guard, cleanRaw: avg(m.map((x) => x.cleanRaw)), cleanFinal: avg(m.map((x) => x.cleanFinal)),
+        endingMatch: avg(m.map((x) => x.endingMatch)), hitLimitRate: avg(m.map((x) => x.hitLimitRate)), violations: {} });
+      for (const x of m) for (const [v, n] of Object.entries(x.rawViolations || {})) row.violations[v] = (row.violations[v] || 0) + n / m.length;
+      for (const key of ['fidelity', 'voice', 'progress', 'natural']) row[key] = avg(rs.map((r) => r.ratings?.[key]));
     } else {
       Object.assign(row, {
         jaRatio: avg(m.map((x) => x.jaRatio)), completeRate: avg(m.map((x) => x.completeRate)), repeatScore: avg(m.map((x) => x.repeatScore)),
@@ -104,8 +109,10 @@ export function toCSV(runs) {
   const head = ['日時', 'モデル', 'テスト', '設定', '主な結果', '平均ms', '平均出力トークン'];
   const rows = runs.map((r) => {
     const m = r.metrics, p = r.params || {};
-    const set = `temp=${p.temperature ?? ''} retries=${p.retries ?? ''}${p.lenient === false ? ' strict' : ''}${p.title ? ` title=${p.title}` : ''}`;
-    const res = r.test === 'shiritori'
+    const set = `temp=${p.temperature ?? ''} retries=${p.retries ?? ''}${p.lenient === false ? ' strict' : ''}${p.strategy ? ` strategy=${p.strategy} guard=${p.guard ? 1 : 0}` : ''}${p.title ? ` title=${p.title}` : ''}`;
+    const res = r.test === 'scenario'
+      ? `発言${m.lines} 違反なし(生)${m.cleanRaw === null ? '-' : Math.round(m.cleanRaw * 100)}% 違反なし(最終)${m.cleanFinal === null ? '-' : Math.round(m.cleanFinal * 100)}% 語尾一致${m.endingMatch === null ? '-' : Math.round(m.endingMatch * 100)}% 上限到達${m.hitLimitRate === null ? '-' : Math.round(m.hitLimitRate * 100)}%`
+      : r.test === 'shiritori'
       ? `連鎖${m.chain} 語${m.validWords} 初回成功${m.firstTryRate === null ? '-' : Math.round(m.firstTryRate * 100)}% 終了:${m.endedBy} 違反:${Object.entries(m.violations).map(([k, v]) => `${k}=${v}`).join('/')}`
       : `発言${m.lines} 日本語${m.jaRatio === null ? '-' : Math.round(m.jaRatio * 100)}% 文末完結${m.completeRate === null ? '-' : Math.round(m.completeRate * 100)}% 反復${m.repeatScore === null ? '-' : m.repeatScore.toFixed(2)} 継続${m.continuity === null ? '-' : m.continuity.toFixed(2)}`;
     return [r.ts, r.model?.short, r.test, set, res, m.avgMs === null ? '' : Math.round(m.avgMs), m.avgTokens === null ? '' : m.avgTokens.toFixed(1)].map(q).join(',');

@@ -9,6 +9,8 @@ import { resolveTime, resolveDate, parseFixedDate, PERIOD_KEYS } from './world.j
 import { nextDelay, pickSpeaker, blockReason, INTERVAL_KEYS } from './proactive.js';
 import { GroupSession, GROUP } from './group.js';
 import { analyzeShiritori, analyzeStory, aggregate, toCSV, seededRand, BENCH_TITLES, VIOLATIONS, BENCH_SCHEMA } from './bench.js';
+import { ScenarioSession, sanitizeScenario, analyzeScenario, STRATEGIES, VIOL } from './scenario.js';
+import { SAMPLE_SCENARIO } from './sample-scenario.js';
 import { LIMITS, LENGTH_KEYS, sanitizeCustom, sanitizePlayer } from './customize.js';
 import { MAX_CHARACTERS, CLIMITS, SOFT_TOTAL_CHARS, blankCharacter, sanitizeCharacter, validateCharacter, newCharacterId, promptChars } from './characters.js';
 import { SAMPLES, characterFromSample } from './samples.js';
@@ -151,7 +153,7 @@ function classify(e, def) {
 }
 
 async function refreshModelUI() {
-  updateGroupUI(); updateBenchUI();
+  updateGroupUI(); updateBenchUI(); updateScnUI();
   const def = selectedDef();
   const st = await LLM.getCacheStatus(def);
   const isLoaded = loadedDef?.key === def.key;
@@ -679,6 +681,11 @@ function renderBench() {
     sr.map((r) => [r.model, r.runs, num(r.avgChain), num(r.avgWords), pct(r.firstTryRate), pct(r.noisyRate), topViol(r.violations), pct(r.nonsenseRate), r.avgMs === null ? '—' : Math.round(r.avgMs), num(r.avgTokens)])));
   if (st.length) box.appendChild(table('物語づくり', ['モデル', '回数', '完走', '日本語率', '文末完結', '反復↓', '継続', '自己言及', '一貫性', '自然さ', '面白さ', '平均ms', '出力tok'],
     st.map((r) => [r.model, r.runs, pct(r.completionRate), pct(r.jaRatio), pct(r.completeRate), num(r.repeatScore, 2), num(r.continuity, 2), r.selfRef, star(r.coherence), star(r.naturalness), star(r.interest), r.avgMs === null ? '—' : Math.round(r.avgMs), num(r.avgTokens)])));
+  const sn = rows.filter((r) => r.test === 'scenario');
+  if (sn.length) box.appendChild(table('シナリオ実験', ['モデル', '方式', 'ガード', '回数', '違反なし(生)', '違反なし(最終)', '主な違反（生）', '語尾一致', '上限到達', '設定遵守', '口調', '場面進行', '自然さ', '平均ms'],
+    sn.map((r) => [r.model, STRATEGIES[r.strategy]?.split('（')[0] || r.strategy, r.guard ? 'あり' : 'なし', r.runs, pct(r.cleanRaw), pct(r.cleanFinal),
+      Object.entries(r.violations || {}).sort((a, b) => b[1] - a[1]).slice(0, 2).map(([k, v]) => `${VIOL[k] || k} ${pct(v)}`).join(' / ') || 'なし', pct(r.endingMatch), pct(r.hitLimitRate),
+      star(r.fidelity), star(r.voice), star(r.progress), star(r.natural), r.avgMs === null ? '—' : Math.round(r.avgMs)])));
   const list = $('bench-runs'); list.textContent = '';
   for (const run of [...bench].reverse().slice(0, 60)) list.appendChild(runView(run));
 }
@@ -686,9 +693,22 @@ function runView(run) {
   const m = run.metrics, d = document.createElement('details'); d.className = 'brun';
   const when = new Date(run.ts).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   const sm = document.createElement('summary');
-  sm.textContent = run.test === 'shiritori' ? `${when}・${run.model.short}・しりとり：連鎖${m.chain}／${m.validWords}語／初回${pct(m.firstTryRate)}／終了:${m.endedBy}` : `${when}・${run.model.short}・物語『${m.title}』：${m.lines}発言／日本語${pct(m.jaRatio)}／反復${num(m.repeatScore, 2)}`;
+  sm.textContent = run.test === 'scenario' ? `${when}・${run.model.short}・シナリオ『${m.title}』（${STRATEGIES[m.strategy]?.split('（')[0]}／ガード${m.guard ? 'あり' : 'なし'}）：${m.lines}発言／違反なし ${pct(m.cleanRaw)}→${pct(m.cleanFinal)}` : run.test === 'shiritori' ? `${when}・${run.model.short}・しりとり：連鎖${m.chain}／${m.validWords}語／初回${pct(m.firstTryRate)}／終了:${m.endedBy}` : `${when}・${run.model.short}・物語『${m.title}』：${m.lines}発言／日本語${pct(m.jaRatio)}／反復${num(m.repeatScore, 2)}`;
   d.appendChild(sm);
-  if (run.test === 'shiritori') {
+  if (run.test === 'scenario') {
+    const pre = document.createElement('pre');
+    pre.textContent = run.transcript.map((l) => (l.kind === 'scene' ? `\n── ${l.text} ──` : `${l.name}：${l.text}${l.rawHard?.length ? `  ⚠${l.rawHard.map((v) => VIOL[v] || v).join('/')}` : ''}`)).join('\n');
+    d.appendChild(pre);
+    const row = document.createElement('div'); row.className = 'row';
+    for (const [key, label] of [['fidelity', '設定の遵守'], ['voice', '口調・人物らしさ'], ['progress', '場面の進行'], ['natural', '自然さ']]) {
+      const lab = document.createElement('label'); lab.textContent = `${label} `; const sel = document.createElement('select');
+      sel.add(new Option('—', '')); for (let n = 1; n <= 5; n++) sel.add(new Option('★'.repeat(n), String(n)));
+      sel.value = run.ratings[key] === null || run.ratings[key] === undefined ? '' : String(run.ratings[key]);
+      sel.addEventListener('change', () => { run.ratings[key] = sel.value ? Number(sel.value) : null; Store.saveBench(bench); renderBenchSummaryOnly(); });
+      lab.appendChild(sel); row.appendChild(lab);
+    }
+    d.appendChild(row);
+  } else if (run.test === 'shiritori') {
     const chips = document.createElement('div');
     run.words.forEach((w, i) => {
       const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = w.word + (w.reading && w.reading !== w.word ? `（${w.reading}）` : '');
@@ -731,6 +751,95 @@ function wireBench() {
   });
   $('btn-bclear').addEventListener('click', () => { if (!bench.length || !confirm(`ベンチマークの結果（${bench.length}件）をすべて削除します。よろしいですか？`)) return; bench.length = 0; Store.saveBench(bench); renderBench(); });
   updateBenchUI(); renderBench();
+}
+
+// ---- scenario experiment: author-written scenario, characters talk freely, every line is checked against it ----
+let scenario = null;
+{ const saved = Store.loadScenario(); if (saved) { const r = sanitizeScenario(saved, 0); if (r.ok) scenario = r.scenario; } }
+const setSStatus = (t) => { $('scn-status').textContent = t; };
+function renderScenarioInfo(errors = [], warnings = []) {
+  const info = $('scn-info'), ul = $('scn-warn'); ul.textContent = '';
+  if (scenario) {
+    info.textContent = `読み込み済み：『${scenario.title}』／登場人物 ${scenario.characters.map((c) => c.name).join('・')}／場面 ${scenario.timeline.length}`;
+    for (const sel of ['sel-sfrom', 'sel-sto']) { const el = $(sel); const prev = el.value; el.textContent = ''; scenario.timeline.forEach((e, i) => el.add(new Option(`${i + 1}. ${e.when || e.id}`, i))); el.value = prev && Number(prev) < scenario.timeline.length ? prev : (sel === 'sel-sto' ? scenario.timeline.length - 1 : 0); }
+  } else info.textContent = 'シナリオが読み込まれていません。「サンプルを読み込む」か、ファイルを選んでください。';
+  for (const e of errors) { const li = document.createElement('li'); li.textContent = `❌ ${e}`; ul.appendChild(li); }
+  for (const w of warnings) { const li = document.createElement('li'); li.textContent = `⚠ ${w}`; ul.appendChild(li); }
+  updateScnUI();
+}
+function updateScnUI() {
+  if (!$('btn-srun')) return;
+  $('btn-srun').hidden = benchRunning; $('btn-srun').disabled = !modelReady || !scenario || groupActive(); $('btn-sstop').hidden = !benchRunning;
+  for (const id of ['btn-scn-sample', 'btn-scn-file', 'btn-scn-template', 'btn-scn-clear', 'sel-sstrategy', 'sel-sfrom', 'sel-sto', 'sel-sturns', 'sel-stemp', 'chk-sguard']) $(id).disabled = benchRunning;
+}
+function loadScenarioObject(obj, size) {
+  const r = sanitizeScenario(obj, size);
+  if (!r.ok) { renderScenarioInfo(r.errors, r.warnings); return false; }
+  scenario = r.scenario; Store.saveScenario(scenario); renderScenarioInfo([], r.warnings); return true;
+}
+function addScnLine(line) {
+  const log = $('scn-log'), d = document.createElement('div');
+  if (line.kind === 'scene') { d.className = 'gline system'; d.textContent = `── ${line.text} ──`; }
+  else {
+    d.className = 'gline npc'; const n = document.createElement('span'); n.className = 'gname'; n.textContent = line.name; d.appendChild(n);
+    const t = document.createElement('span'); t.textContent = line.text; d.appendChild(t);
+    if (line.rawHard?.length) { const v = document.createElement('span'); v.className = 'viol'; v.textContent = `⚠ ${line.rawHard.map((x) => VIOL[x] || x).join('・')}`; d.appendChild(v); }
+  }
+  log.appendChild(d); log.scrollTop = log.scrollHeight;
+}
+async function runScenario() {
+  if (benchRunning || groupActive() || !scenario) return;
+  if (!modelReady || !loadedDef) return setSStatus('先にAIモデルを読み込んでください（画面下の「ローカルAIモデル」）。');
+  if (chat.busy) return setSStatus('いまは別の処理中です。少し待ってからもう一度お試しください。');
+  const from = Number($('sel-sfrom').value), to = Number($('sel-sto').value);
+  if (to < from) return setSStatus('終了する場面は、開始する場面と同じか、それより後にしてください。');
+  const opts = { strategy: $('sel-sstrategy').value, turnsPerScene: Number($('sel-sturns').value), sceneFrom: from, sceneTo: to, temperature: Number($('sel-stemp').value), guard: $('chk-sguard').checked };
+  const session = new ScenarioSession({ scenario, ...opts, generate: (m, o) => chat.generateExclusive(m, o) });
+  benchRunning = true; benchAbort = false; $('scn-log').textContent = ''; updateScnUI(); updateBenchUI(); refreshModelUI();
+  let why = '', busyTries = 0, finished = false;
+  try {
+    for (let n = 0; n < 600; n++) {
+      if (benchAbort) { session.stop(); why = '中断しました。'; break; }
+      let r;
+      try { r = await session.step(); } catch (e) { console.error(e); showDetails(e); why = '生成でエラーが出たため、中断しました。'; break; }
+      if (r.type === 'stopped') { why = '中断しました。'; break; }
+      if (r.type === 'busy') { if (++busyTries > 40) { why = '他の処理が長引いているため、中断しました。'; break; } await sleep(500); continue; }
+      busyTries = 0;
+      if (r.type === 'aborted') { why = benchAbort ? '中断しました。' : 'チャットを送ったため、中断しました。'; break; }
+      if (r.line) addScnLine(r.line);
+      setSStatus(`実験中…（${session.lines.filter((l) => l.kind === 'npc').length}発言）`);
+      if (r.type === 'end') { finished = true; break; }
+      await sleep(0);
+    }
+  } finally { benchRunning = false; benchAbort = false; updateScnUI(); updateBenchUI(); refreshModelUI(); }
+  if (session.lines.some((l) => l.kind === 'npc')) {
+    const run = {
+      id: `r_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, ts: new Date().toISOString(), appVersion: APP.version,
+      model: { key: loadedDef.key, id: loadedDef.id, dtype: loadedDef.dtype, short: loadedDef.short }, backend: LLM.backendInfo().mode, test: 'scenario',
+      params: { ...opts, title: scenario.title }, metrics: analyzeScenario(session), ratings: { fidelity: null, voice: null, progress: null, natural: null },
+      transcript: session.lines.map((l) => ({ kind: l.kind, name: l.name, text: l.text, rawHard: l.rawHard, speakerId: l.speakerId })),
+      attempts: session.attempts.map(({ turn, scene, speaker, attempt, ms, newTokens, hitLimit, rawHard, finalHard }) => ({ turn, scene, speaker, attempt, ms, newTokens, hitLimit, rawHard, finalHard }))
+    };
+    bench.push(run); if (bench.length > 200) bench.splice(0, bench.length - 200); Store.saveBench(bench); renderBench();
+    const m = run.metrics;
+    setSStatus(`${why || (finished ? '完了しました。' : '終了しました。')} ${m.lines}発言：違反なし ${pct(m.cleanRaw)}（生）→ ${pct(m.cleanFinal)}（最終）。結果は下の表と記録に追加されました。`);
+  } else setSStatus(why || '発言が生成されませんでした。');
+}
+function wireScenario() {
+  const st = $('sel-sstrategy'); st.textContent = ''; for (const [k, v] of Object.entries(STRATEGIES)) st.add(new Option(v, k));
+  $('btn-scn-sample').addEventListener('click', () => { if (loadScenarioObject(JSON.parse(JSON.stringify(SAMPLE_SCENARIO)), 0)) ui.toast('サンプルシナリオを読み込みました。'); });
+  $('btn-scn-file').addEventListener('click', () => $('file-scn').click());
+  $('file-scn').addEventListener('change', async (e) => {
+    const f = e.target.files?.[0]; e.target.value = ''; if (!f) return;
+    let obj; const text = await f.text();
+    try { obj = JSON.parse(text); } catch { return renderScenarioInfo(['JSONとして読み込めませんでした。']); }
+    if (loadScenarioObject(obj, new Blob([text]).size)) ui.toast('シナリオを読み込みました。');
+  });
+  $('btn-scn-template').addEventListener('click', () => downloadJson(SAMPLE_SCENARIO, 'scenario-template.json'));
+  $('btn-scn-clear').addEventListener('click', () => { scenario = null; Store.saveScenario(null); renderScenarioInfo(); $('scn-log').textContent = ''; });
+  $('btn-srun').addEventListener('click', runScenario);
+  $('btn-sstop').addEventListener('click', () => { benchAbort = true; chat.abortExclusive(); setSStatus('中断しています…'); });
+  renderScenarioInfo();
 }
 
 // ---- backup / data ----
@@ -847,7 +956,7 @@ async function registerSW(checker) {
 async function init() {
   $('ver').textContent = APP.version;
   document.title = `${APP.appName} v${APP.version}`;
-  wire(); wireCustom(); wireCharacters(); wireGroup(); wireBench(); ui.setGenerating(false); ui.setChatEnabled(false);
+  wire(); wireCustom(); wireCharacters(); wireGroup(); wireBench(); wireScenario(); ui.setGenerating(false); ui.setChatEnabled(false);
   refreshNpcList();
   speech.onVoices = refreshVoices;
   selectNpc(settings.selectedNpc);

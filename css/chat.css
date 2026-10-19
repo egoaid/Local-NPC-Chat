@@ -62,3 +62,7 @@
 .chip { display: inline-block; min-height: 32px; padding: 0 10px; margin: 2px; border-radius: 16px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: .85rem; }
 .chip[aria-pressed="true"] { background: #f4cfc5; color: #5a1d0c; border-color: #d98b77; text-decoration: line-through; }
 .brun pre { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .8rem; margin: 6px 0; }
+
+.gline .viol { display: inline-block; margin-left: 6px; font-size: .72rem; color: #a5482f; font-weight: 700; }
+.gline .fixed { font-size: .72rem; color: var(--muted); }
+#scn-warn { max-height: 8rem; overflow-y: auto; padding-left: 1.2rem; }

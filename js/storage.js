@@ -23,7 +23,7 @@ const DEFAULT_SETTINGS = {
 };
 const DEFAULTS = () => ({
   settings: {}, custom: { world: '', player: { name: '', profile: '', personality: '' } },
-  conversations: {}, memory: {}, relations: {}, characters: [], meta: {}, bench: []
+  conversations: {}, memory: {}, relations: {}, characters: [], meta: {}, bench: [], scenario: null
 });
 const KEYS = Object.keys(DEFAULTS());
 
@@ -135,6 +135,8 @@ export const loadMemory = () => cache.memory;
 export const saveMemory = (m) => { cache.memory = m; return persist('memory'); };
 export const loadRelations = () => cache.relations;
 export const saveRelations = (r) => { cache.relations = r; return persist('relations'); };
+export const loadScenario = () => cache.scenario;
+export const saveScenario = (sc) => { cache.scenario = sc; return persist('scenario'); };
 export const loadBench = () => cache.bench;
 export const saveBench = (b) => { cache.bench = b; return persist('bench'); };
 export const loadMeta = () => cache.meta;

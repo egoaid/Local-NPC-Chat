@@ -170,6 +170,35 @@
     </details>
   </section>
 
+  <section class="card group-card" aria-labelledby="scn-h">
+    <details>
+      <summary id="scn-h">シナリオ実験（設定に沿った自由会話）</summary>
+      <p class="muted small">あらかじめ書いたシナリオ（背景・登場人物・人間関係・時系列）を軸に、登場人物どうしが自由に会話できるかを実験します。生成された各発言は、シナリオと照らして<strong>機械的にチェック</strong>されます（秘密の漏れ、未来の出来事の漏れ、知らないはずの出来事、一人称の誤り、他人の発言の代筆、指示文の漏れ、繰り返しなど）。辞書もAIの自己採点も使いません。</p>
+      <div class="row">
+        <button id="btn-scn-sample" type="button" class="secondary">サンプルを読み込む</button>
+        <button id="btn-scn-file" type="button" class="secondary">ファイルから読み込む</button>
+        <button id="btn-scn-template" type="button" class="secondary">ひな形を保存（JSON）</button>
+        <button id="btn-scn-clear" type="button" class="secondary">読み込みを解除</button>
+      </div>
+      <input id="file-scn" type="file" accept="application/json,.json" hidden>
+      <p id="scn-info" class="small"></p>
+      <ul id="scn-warn" class="muted small"></ul>
+      <label>方式（モデルに渡す情報の量）<select id="sel-sstrategy"></select></label>
+      <label>開始する場面 <select id="sel-sfrom"></select></label>
+      <label>終了する場面 <select id="sel-sto"></select></label>
+      <label>1場面あたりの発言数 <select id="sel-sturns"><option>4</option><option selected>6</option><option>8</option><option>12</option></select></label>
+      <label>温度 <select id="sel-stemp"><option value="0.1">0.1（公式の推奨・堅い）</option><option value="0.3" selected>0.3</option><option value="0.7">0.7（自由）</option></select></label>
+      <label class="toggle"><input id="chk-sguard" type="checkbox"> ガード（出力の形を自動で整え、違反があれば1回だけやり直す）</label>
+      <div class="row">
+        <button id="btn-srun" type="button">実験を開始</button>
+        <button id="btn-sstop" type="button" class="danger" hidden>中断</button>
+      </div>
+      <p id="scn-status" class="muted small" role="status"></p>
+      <div id="scn-log" class="group-log" role="log"></div>
+      <p class="muted small">⚠は、モデルが最初に出した発言にあった違反です（ガードがオンのときは、補正のあとの結果を表示します）。結果は「ベンチマーク」の表と記録に加わり、記録の中で★評価（設定の遵守・口調・場面の進行・自然さ）を付けられます。「ガードあり／なし」を比べると、プログラム側の補正でどこまで補えるかが分かります。</p>
+    </details>
+  </section>
+
   <section class="card custom-card" aria-labelledby="custom-h">
     <details>
       <summary id="custom-h">世界とプレイヤーの設定（時間・世界観・あなたの設定・返答の長さ・記憶）</summary>

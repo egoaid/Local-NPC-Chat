@@ -3,8 +3,8 @@
 (function (g) {
   g.APP_VERSION = Object.freeze({
     appName: 'Local NPC Chat RPG',
-    version: '0.10.0-build.001',
-    releaseDate: '2026-10-18',
+    version: '0.11.0-build.001',
+    releaseDate: '2026-10-19',
     copyright: '© 2026 egoaid',
     rights: 'All rights reserved.'
   });
